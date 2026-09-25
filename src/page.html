@@ -1067,12 +1067,14 @@ input[type=number]{width:60px}
 .share-panel[hidden]{display:none}
 .share-panel h3{margin:0 0 var(--sp-2);font-size:var(--fs-lg);font-weight:var(--fw-bold)}
 .share-panel .share-msg{color:var(--c-text-secondary);margin:0 0 var(--sp-3);word-break:break-all}
+.share-panel .share-link{margin:0 0 var(--sp-3)}
+.share-panel .share-link-name{font-size:var(--fs-sm);color:var(--c-text-secondary);margin:0 0 var(--sp-1)}
+.share-panel .share-link-row{display:flex;gap:var(--sp-2)}
 .share-panel .share-url{
-  width:100%;box-sizing:border-box;margin:0 0 var(--sp-3);
+  flex:1 1 auto;min-width:0;box-sizing:border-box;
   padding:var(--sp-2) var(--sp-3);border:1px solid var(--c-line-strong);border-radius:var(--r-base);
   background:var(--c-surface);color:var(--c-text);font-family:var(--font-mono);font-size:var(--fs-sm);
 }
-.share-panel .share-url[hidden]{display:none}
 .share-panel .share-row{display:flex;gap:var(--sp-2);flex-wrap:wrap}
 .share-panel .share-row .btn[hidden]{display:none}
 .share-panel .share-note{margin:var(--sp-3) 0 0;color:var(--c-text-tertiary);font-size:var(--fs-sm)}
@@ -1941,14 +1943,14 @@ input[type=number]{width:60px}
 <div class="share-panel" id="sharePanel" hidden role="dialog" aria-label="远程分享">
   <h3>远程分享</h3>
   <p class="share-msg" id="shareMsg">未开启</p>
-  <input class="share-url" id="shareUrl" type="text" readonly hidden>
+  <div id="shareLinks"></div>
   <div class="share-row">
     <button class="btn btn-sm" id="shareStart" type="button">开启分享</button>
-    <button class="btn btn-sm" id="shareCopy" type="button" hidden>复制链接</button>
     <button class="btn btn-sm" id="shareStop" type="button" hidden>关闭分享</button>
     <button class="btn btn-sm" id="shareClose" type="button">收起</button>
   </div>
-  <p class="share-note">拿到链接的人都能点歌。每次开启都会换新链接，关闭后旧链接立即失效；退出游戏也会自动关闭。</p>
+  <p class="share-note">拿到链接的人都能点歌。每次开启都会换新链接，关闭后旧链接立即失效；退出游戏也会自动关闭。
+    有多条链接时发任意一条即可：隧道链接大多数网络都能打开；IPv6 直连不经过海外服务器，但要对方也有 IPv6。</p>
 </div>
 
 <div id="toasts" aria-live="polite"></div>
@@ -3084,7 +3086,7 @@ function paintBadge(n, st, v){
 var SHARE_TEXT = {
   off:'未开启。点「开启分享」生成一个公网链接。',
   downloading:'首次使用，正在下载 cloudflared（约 50MB）…',
-  starting:'正在建立隧道，通常 5–15 秒…',
+  starting:'正在建立隧道，通常 5–30 秒…',
   running:'已开启。把下面的链接发给对方即可远程点歌：',
   error:'开启失败'
 };
@@ -3094,14 +3096,21 @@ function paintShare(j){
   var msg = SHARE_TEXT[st] || st;
   if (j && j.msg && st !== 'running') msg = (st === 'error' ? '开启失败：' : '') + j.msg;
   $('shareMsg').textContent = msg;
-  var url = (j && j.url) || '';
-  var elUrl = $('shareUrl');
-  elUrl.hidden = !url;
-  if (elUrl.value !== url) elUrl.value = url;
+  var links = (j && j.links) || [];
+  var sig = JSON.stringify(links);
+  var elLinks = $('shareLinks');
+  /* 链接没变就不重建, 免得用户正在选中的文字被刷掉 */
+  if (elLinks.getAttribute('data-sig') !== sig){
+    elLinks.setAttribute('data-sig', sig);
+    elLinks.innerHTML = links.map(function(l, i){
+      return '<div class="share-link"><div class="share-link-name">' + escHtml(l.name) + '</div>' +
+        '<div class="share-link-row"><input class="share-url" type="text" readonly value="' + escHtml(l.url) + '">' +
+        '<button class="btn btn-sm" type="button" data-copy="' + i + '">复制</button></div></div>';
+    }).join('');
+  }
   var busy = st === 'downloading' || st === 'starting';
   $('shareStart').hidden = st === 'running' || busy;
   $('shareStart').textContent = st === 'error' ? '重试' : '开启分享';
-  $('shareCopy').hidden = !url;
   $('shareStop').hidden = st === 'off' || st === 'error';
   $('shareBtn').classList.toggle('is-busy', busy);
   clearTimeout(shareTimer);
@@ -3130,8 +3139,10 @@ function bindShare(){
       toast('ok', '已关闭分享', '旧链接已失效');
     }).catch(function(e){ toast('bad', '关闭分享失败', e.message); });
   });
-  $('shareCopy').addEventListener('click', function(){
-    var elUrl = $('shareUrl'), url = elUrl.value;
+  $('shareLinks').addEventListener('click', function(e){
+    var btn = e.target.closest('[data-copy]');
+    if (!btn) return;
+    var elUrl = btn.parentNode.querySelector('.share-url'), url = elUrl.value;
     function done(){ toast('ok', '已复制分享链接', url); }
     /* 非 https 的局域网页面没有 navigator.clipboard, 退回 execCommand */
     if (navigator.clipboard && window.isSecureContext){

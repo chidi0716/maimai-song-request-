@@ -146,6 +146,8 @@ namespace SongRequestMod
         public static bool JacketService = true;
         /// <summary>游戏启动后自动开启远程分享(关掉就只能在网页上点「分享链接」手动开)</summary>
         public static bool RemoteAutoStart = true;
+        /// <summary>远程分享时, 本机有公网 IPv6 就额外给一条直连链接</summary>
+        public static bool IPv6Direct = true;
 
         private static string PathFile
         {
@@ -226,6 +228,10 @@ namespace SongRequestMod
                     {
                         if (bool.TryParse(val, out b)) RemoteAutoStart = b;
                     }
+                    else if (key == "IPv6直连" || key.Equals("IPv6Direct", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (bool.TryParse(val, out b)) IPv6Direct = b;
+                    }
                 }
             }
             catch (Exception e)
@@ -240,7 +246,7 @@ namespace SongRequestMod
         {
             try
             {
-                string[] need = { "启用", "网页", "网页端口", "局域网访问", "跳转后进难度画面", "封面服务", "远程分享自动开启", "详细日志" };
+                string[] need = { "启用", "网页", "网页端口", "局域网访问", "跳转后进难度画面", "封面服务", "远程分享自动开启", "IPv6直连", "详细日志" };
                 if (!System.IO.File.Exists(PathFile)) { Save(); return; }
                 string txt = System.IO.File.ReadAllText(PathFile);
                 for (int i = 0; i < need.Length; i++)
@@ -291,10 +297,13 @@ namespace SongRequestMod
                     + "封面服务=" + B(JacketService) + "\r\n"
                     + "\r\n"
                     + "## ===== 远程分享 =====\r\n"
-                    + "## 在网页上点「分享链接」会生成一个公网链接(Cloudflare 免费隧道), 贴给别人就能远程点歌\r\n"
+                    + "## 生成一个公网链接, 贴给别人就能远程点歌(免注册): 先试 Cloudflare 免费隧道, 连不上再试 localhost.run\r\n"
                     + "## 首次使用会自动下载 cloudflared.exe 到 Mods\\SongRequestMod\\; 每次开启都换新链接, 关掉后旧链接立即失效\r\n"
                     + "## true(默认): 游戏一启动就自动开启分享, 链接打印在日志里、也显示在本机网页上; false: 只在网页上手动开\r\n"
                     + "远程分享自动开启=" + B(RemoteAutoStart) + "\r\n"
+                    + "## IPv6 直连: 本机有公网 IPv6 时额外给一条直连链接(不经过海外服务器, 国内网络更稳)\r\n"
+                    + "## 需要对方也有 IPv6, 且光猫/路由器允许 IPv6 入站; 链接里能看到你的 IPv6 地址。不想用就改 false\r\n"
+                    + "IPv6直连=" + B(IPv6Direct) + "\r\n"
                     + "\r\n"
                     + "## ===== 日志 =====\r\n"
                     + "## false(默认): 只留点歌台地址和报错; true: 过程日志全开\r\n"

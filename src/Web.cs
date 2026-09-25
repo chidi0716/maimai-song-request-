@@ -76,6 +76,60 @@ namespace SongRequestMod
             }
         }
 
+        /// <summary>本机公网 IPv6(2000::/3), 优先固定地址, 不用隐私临时地址(几小时就换)和 Teredo 隧道地址</summary>
+        internal static string PublicIPv6()
+        {
+            string temp = null;
+            try
+            {
+                foreach (System.Net.NetworkInformation.NetworkInterface ni in
+                    System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (ni.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up
+                        || ni.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback
+                        || ni.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Tunnel)
+                    {
+                        continue;
+                    }
+                    foreach (System.Net.NetworkInformation.UnicastIPAddressInformation ua in
+                        ni.GetIPProperties().UnicastAddresses)
+                    {
+                        IPAddress a = ua.Address;
+                        if (a.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6)
+                        {
+                            continue;
+                        }
+                        byte[] b = a.GetAddressBytes();
+                        bool global = (b[0] & 0xE0) == 0x20;
+                        bool teredo = b[0] == 0x20 && b[1] == 0x01 && b[2] == 0 && b[3] == 0;
+                        if (!global || teredo)
+                        {
+                            continue;
+                        }
+                        string s = new IPAddress(b).ToString();   // 去掉 %scope
+                        bool isTemp = false;
+                        try
+                        {
+                            isTemp = ua.SuffixOrigin == System.Net.NetworkInformation.SuffixOrigin.Random;
+                        }
+                        catch
+                        {
+                        }
+                        if (!isTemp)
+                        {
+                            return s;
+                        }
+                        if (temp == null) temp = s;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                ModLog.Info("[SongRequest] 取本机 IPv6 失败: " + e.Message);
+            }
+            return temp;
+        }
+
         internal static void Stop()
         {
             try
@@ -87,6 +141,7 @@ namespace SongRequestMod
                     _listener.Close();
                     _listener = null;
                 }
+
             }
             catch
             {
@@ -133,15 +188,17 @@ namespace SongRequestMod
             string path = ctx.Request.Url.AbsolutePath;
             string method = ctx.Request.HttpMethod;
 
-            // 远程(经隧道进来的)请求: 必须带本次分享的密钥, 且不能碰诊断/隧道开关接口
+            // 远程(经隧道或 IPv6 直连进来的)请求: 必须带本次分享的密钥, 且不能碰诊断/隧道开关接口
             bool remote = IsRemote(ctx.Request);
+            bool viaV6 = ctx.Request.Headers[Tunnel.RemoteHeader] == "v6";
             if (remote)
             {
                 string qk = Query(ctx.Request.Url.Query, "k");
                 if (Tunnel.KeyMatches(qk))
                 {
+                    // 隧道那边是 https, IPv6 直连是 http(带 Secure 的 cookie 浏览器不会存)
                     ctx.Response.AppendHeader("Set-Cookie",
-                        "srk=" + qk + "; Path=/; Max-Age=86400; HttpOnly; Secure; SameSite=Lax");
+                        "srk=" + qk + "; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax" + (viaV6 ? "" : "; Secure"));
                 }
                 else if (!Tunnel.KeyMatches(Cookie(ctx.Request, "srk")))
                 {
@@ -377,12 +434,14 @@ namespace SongRequestMod
         }
 
         /// <summary>
-        /// 经 cloudflared 隧道进来的请求: TCP 上看是 127.0.0.1, 但 Cloudflare 一定会带上这些头。
+        /// 经隧道进来的请求: TCP 上看是 127.0.0.1, 但一定经过 Tunnel 的本机转发口(会加 X-SongRequest-Remote),
+        /// 隧道服务自己也会加 Cf-Ray / X-Forwarded-For 之类的头, 任一命中都算远程。
         /// (本机/局域网的人自己伪造这些头只会把自己降级成"远程", 不会多拿权限)
         /// </summary>
         private static bool IsRemote(HttpListenerRequest r)
         {
-            return !string.IsNullOrEmpty(r.Headers["Cf-Ray"])
+            return !string.IsNullOrEmpty(r.Headers[Tunnel.RemoteHeader])
+                || !string.IsNullOrEmpty(r.Headers["Cf-Ray"])
                 || !string.IsNullOrEmpty(r.Headers["Cf-Connecting-Ip"])
                 || !string.IsNullOrEmpty(r.Headers["X-Forwarded-For"]);
         }
