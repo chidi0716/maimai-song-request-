@@ -4,10 +4,10 @@ using MelonLoader;
 using HarmonyLib;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(SongRequestMod.Mod), "SongRequest", "1.1.1", "")]
+[assembly: MelonInfo(typeof(SongRequestMod.Mod), "SongRequest", "1.1.2", "")]
 [assembly: MelonGame("sega-interactive", "Sinmai")]
-[assembly: AssemblyVersion("1.1.1.0")]
-[assembly: AssemblyFileVersion("1.1.1.0")]
+[assembly: AssemblyVersion("1.1.2.0")]
+[assembly: AssemblyFileVersion("1.1.2.0")]
 
 namespace SongRequestMod
 {
@@ -31,6 +31,7 @@ namespace SongRequestMod
             {
                 HarmonyInstance.PatchAll(typeof(Patch_SelectOnStart));
                 HarmonyInstance.PatchAll(typeof(Patch_SelectOnRelease));
+                CrashGuard.Install();
                 ModLog.Info("[SongRequest] Harmony 已挂: MusicSelectProcess.OnStart / OnRelease");
             }
             catch (Exception e)
@@ -48,7 +49,9 @@ namespace SongRequestMod
         {
             if (Config.Enable && Config.WebEnable)
             {
-                bool webOk = Web.Start(Config.Port);
+                // 上次游戏崩了没关掉的隧道进程会占着端口, 先清掉再起点歌台
+                Tunnel.KillOrphan();
+                _webOk = Web.Start(Config.Port);
                 _urlLoggedAt = Time.realtimeSinceStartup;
                 // 别名库启动就解析一次: /api/status 的"别名 N 条 / M 首"从此跟曲库有没有读出来无关
                 try
@@ -58,10 +61,6 @@ namespace SongRequestMod
                 catch (Exception e)
                 {
                     MelonLogger.Warning("[SongRequest] 别名库预载失败: " + e.Message);
-                }
-                if (Config.RemoteAutoStart && webOk)
-                {
-                    Tunnel.Start();
                 }
             }
         }
@@ -88,12 +87,62 @@ namespace SongRequestMod
         }
 
         private static bool _updateErrorLogged;
+        private static bool _webOk;
+        private static bool _ready;
+        private static bool _remoteStarted;
         private static float _urlLoggedAt = -1f;
         private static int _urlRelog;
         private float _liveTimer;
 
+        /// <summary>
+        /// 游戏数据(DataManager)加载完之前什么都不做(移植自原作者 v1.0.3):
+        /// 加载途中就去读曲目表 / 游玩状态, 会跟游戏自己和别的 mod 的初始化撞上, 登录时闪退。
+        /// </summary>
+        /// <summary>游戏数据已就绪(网页线程也用它挡住加载期间的请求)</summary>
+        internal static bool Ready
+        {
+            get { return _ready; }
+        }
+
+        private static bool GameReady()
+        {
+            if (_ready)
+            {
+                return true;
+            }
+            try
+            {
+                var dm = MAI2.Util.Singleton<Manager.DataManager>.Instance;
+                if (dm == null || !dm.IsLoaded())
+                {
+                    return false;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+            _ready = true;
+            ModLog.Always("[SongRequest] 游戏数据就绪, 开始工作");
+            return true;
+        }
+
         private void Tick()
         {
+            if (!GameReady())
+            {
+                return;
+            }
+            // 0) 远程分享也等游戏数据就绪再开, 不在游戏加载期间起外部进程
+            if (!_remoteStarted)
+            {
+                _remoteStarted = true;
+                if (Config.RemoteAutoStart && _webOk)
+                {
+                    Tunnel.Start();
+                }
+            }
+
             // 1) 网页点歌请求: 统一在主线程执行(HTTP 线程直接动 Unity/游戏对象会偶发崩)
             SelectDriver.RunPending();
 

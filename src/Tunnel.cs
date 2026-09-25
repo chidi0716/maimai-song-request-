@@ -407,7 +407,7 @@ namespace SongRequestMod
             try { if (File.Exists(PidFile)) File.Delete(PidFile); } catch { }
         }
 
-        private static void KillOrphan()
+        internal static void KillOrphan()
         {
             try
             {

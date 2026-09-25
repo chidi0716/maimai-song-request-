@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.1.2
+
+- 修复：装 mod 后登录闪退（`PlInformationProcess.RestoreGhost` NullReference）。移植原作者 v1.0.3 的两处修复：
+  - 游戏数据（`DataManager`）加载完之前 mod 什么都不做，日志出现「游戏数据就绪, 开始工作」后才开始读曲目表 / 游玩状态
+  - 崩溃保护 `CrashGuard`：段位 BOSS 找不到时退到最近的 BOSS；曲目分类不存在时顶成存在的分类；`RestoreGhost` 与选曲分类页签的异常直接吞掉，不让游戏闪退
+- 远程分享改为游戏数据就绪后才启动，不在游戏加载期间起外部进程
+- 启动点歌台前先清掉上次崩溃残留的隧道进程（修复重开游戏后「端口 8790 被占用」）
+
 ## v1.1.1
 
 - 修复：首次下载 cloudflared 时会修改游戏进程全局的 HTTPS 设置（`ServicePointManager.SecurityProtocol`），可能连带影响游戏自己的联网；现在改由 curl.exe / PowerShell 外部进程下载，不碰游戏进程

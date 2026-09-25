@@ -159,6 +159,13 @@ namespace SongRequestMod
                 }
             }
 
+            // 游戏数据还没加载完: 碰曲目表 / 曲绘 / 点歌的接口一律先不处理(同 Mod.GameReady 的原因)
+            if (!Mod.Ready && (path == "/api/songs" || path == "/jacket" || path == "/api/play"
+                || path == "/api/random" || path == "/api/selftest"))
+            {
+                ReplyJson(ctx, "{\"ok\":false,\"msg\":\"游戏数据加载中, 请稍候再试\"}", 503);
+                return;
+            }
             if (path == "/api/songs")
             {
                 // ?refresh=1 强制重读游戏曲目表(连数据源快照也丢掉重探); 平时走缓存(曲目数/类型变了会自动重建)
