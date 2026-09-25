@@ -9,6 +9,9 @@ using MelonLoader;
 
 namespace SongRequestMod
 {
+    // 游戏里有个全局命名空间也叫 Process(MusicSelectProcess 等), 不起别名的话 Process 会解析成它
+    using Proc = System.Diagnostics.Process;
+
     /// <summary>
     /// 远程分享: 用 Cloudflare 免费临时隧道(cloudflared "quick tunnel")把本机点歌台映射成一个公网 https 链接,
     /// 贴给别人就能远程点歌。不需要注册账号、不需要改路由器 / 防火墙。
@@ -22,7 +25,7 @@ namespace SongRequestMod
             "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe";
 
         private static readonly object _lock = new object();
-        private static Process _proc;
+        private static Proc _proc;
         private static string _state = "off";     // off / downloading / starting / running / error
         private static string _msg = "";
         private static string _baseUrl;           // https://xxx.trycloudflare.com
@@ -66,7 +69,7 @@ namespace SongRequestMod
 
         internal static void Stop()
         {
-            Process p;
+            Proc p;
             lock (_lock)
             {
                 p = _proc;
@@ -138,7 +141,7 @@ namespace SongRequestMod
             psi.CreateNoWindow = true;
             psi.RedirectStandardError = true;
             psi.RedirectStandardOutput = true;
-            Process p = Process.Start(psi);
+            Proc p = Proc.Start(psi);
             lock (_lock)
             {
                 if (_state != "starting")
@@ -180,7 +183,7 @@ namespace SongRequestMod
         private static readonly Regex UrlRe = new Regex(@"https://[a-z0-9-]+\.trycloudflare\.com", RegexOptions.IgnoreCase);
         private static string _lastLine = "";
 
-        private static void StartReader(Process p, StreamReader reader)
+        private static void StartReader(Proc p, StreamReader reader)
         {
             Thread th = new Thread(() =>
             {
@@ -351,7 +354,7 @@ namespace SongRequestMod
                     psi.Arguments = "-L -f -s -o \"" + tmp + "\" \"" + DownloadUrl + "\"";
                     psi.UseShellExecute = false;
                     psi.CreateNoWindow = true;
-                    using (Process p = Process.Start(psi))
+                    using (Proc p = Proc.Start(psi))
                     {
                         if (!p.WaitForExit(300000))
                         {
@@ -389,7 +392,7 @@ namespace SongRequestMod
             get { return Path.Combine(Web.GameDir, "Mods", "SongRequestMod", "cloudflared.pid"); }
         }
 
-        private static void WritePidFile(Process p)
+        private static void WritePidFile(Proc p)
         {
             try
             {
@@ -414,7 +417,7 @@ namespace SongRequestMod
                 int pid;
                 if (int.TryParse(File.ReadAllText(PidFile).Trim(), out pid))
                 {
-                    Process old = Process.GetProcessById(pid);
+                    Proc old = Proc.GetProcessById(pid);
                     if (old.ProcessName.IndexOf("cloudflared", StringComparison.OrdinalIgnoreCase) >= 0)
                     {
                         Kill(old);
@@ -427,7 +430,7 @@ namespace SongRequestMod
             DeletePidFile();
         }
 
-        private static void Kill(Process p)
+        private static void Kill(Proc p)
         {
             if (p == null) return;
             try
