@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.1.1
+
+- 修复：首次下载 cloudflared 时会修改游戏进程全局的 HTTPS 设置（`ServicePointManager.SecurityProtocol`），可能连带影响游戏自己的联网；现在改由 curl.exe / PowerShell 外部进程下载，不碰游戏进程
+- 修复：点歌台启动失败（端口被占）时仍会自动开启远程分享，隧道会指向占用该端口的其他程序；现在点歌台没起来就不开分享，日志提示常见原因（上次游戏没关干净）
+- 修复：内嵌的 `System.Diagnostics.Process` 与游戏的 `Process` 命名空间同名导致用真实游戏 dll 编译失败
+
 ## v1.1.0
 
 - 新增：**远程分享**。游戏启动后自动用 Cloudflare 免费临时隧道生成一个公网链接（`https://xxxx.trycloudflare.com/?k=密钥`），发给别人就能远程搜歌、点歌、看实时面板；免注册、免改路由器 / 防火墙。首次使用自动下载 `cloudflared.exe` 到 `Mods\SongRequestMod\`

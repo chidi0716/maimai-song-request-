@@ -29,7 +29,8 @@ namespace SongRequestMod
 
 
 
-        internal static void Start(int port)
+        /// <summary>启动点歌台; 失败(端口被占等)返回 false —— 这时不能开远程分享, 否则隧道会指向别的程序</summary>
+        internal static bool Start(int port)
         {
             try
             {
@@ -69,10 +70,13 @@ namespace SongRequestMod
                 }
                 ModLog.Always("[SongRequest] v" + typeof(Web).Assembly.GetName().Version
                     + "  本机: http://127.0.0.1:" + port + "/" + lanTxt);
+                return true;
             }
             catch (Exception e)
             {
-                MelonLogger.Error("[SongRequest] 启动点歌台失败(端口 " + port + " 可能被占用): " + e.Message);
+                MelonLogger.Error("[SongRequest] 启动点歌台失败(端口 " + port + " 可能被占用, 常见原因是上次游戏没关干净,"
+                    + " 在任务管理器结束残留的 Sinmai 后重开; 或改 SongRequestMod.toml 的「网页端口」): " + e.Message);
+                return false;
             }
         }
 

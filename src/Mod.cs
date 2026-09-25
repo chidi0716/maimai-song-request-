@@ -4,10 +4,10 @@ using MelonLoader;
 using HarmonyLib;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(SongRequestMod.Mod), "SongRequest", "1.1.0", "")]
+[assembly: MelonInfo(typeof(SongRequestMod.Mod), "SongRequest", "1.1.1", "")]
 [assembly: MelonGame("sega-interactive", "Sinmai")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyVersion("1.1.1.0")]
+[assembly: AssemblyFileVersion("1.1.1.0")]
 
 namespace SongRequestMod
 {
@@ -48,7 +48,7 @@ namespace SongRequestMod
         {
             if (Config.Enable && Config.WebEnable)
             {
-                Web.Start(Config.Port);
+                bool webOk = Web.Start(Config.Port);
                 _urlLoggedAt = Time.realtimeSinceStartup;
                 // 别名库启动就解析一次: /api/status 的"别名 N 条 / M 首"从此跟曲库有没有读出来无关
                 try
@@ -59,7 +59,7 @@ namespace SongRequestMod
                 {
                     MelonLogger.Warning("[SongRequest] 别名库预载失败: " + e.Message);
                 }
-                if (Config.RemoteAutoStart)
+                if (Config.RemoteAutoStart && webOk)
                 {
                     Tunnel.Start();
                 }
