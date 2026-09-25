@@ -615,43 +615,17 @@ namespace SongRequestMod
             catch
             {
             }
-            // 1) 游戏自带 Mono 的 TLS 未必够新, 先试一次
-            try
-            {
-                ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;   // TLS 1.2
-                using (WebClient wc = new WebClient())
-                {
-                    wc.DownloadFile(DownloadUrl, tmp);
-                }
-            }
-            catch (Exception e)
-            {
-                ModLog.Info("[SongRequest] WebClient 下载失败, 改用 curl: " + e.Message);
-                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
-            }
-            // 2) 不行就用 Windows 10+ 自带的 curl.exe(连不上 GitHub 时最多等 3 分钟, 然后去试 localhost.run)
+            // 交给外部进程下载: 不能在游戏进程里改 ServicePointManager.SecurityProtocol,
+            // 那是全进程的设置, 会连带影响游戏自己跟服务器的 HTTPS 通信
+            // 1) Windows 10+ 自带的 curl.exe
+            RunDownloader(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "curl.exe"),
+                "-L -f -s --connect-timeout 15 --max-time 180 -o \"" + tmp + "\" \"" + DownloadUrl + "\"");
+            // 2) 没有 curl 就用 PowerShell
             if (!File.Exists(tmp))
             {
-                try
-                {
-                    string curl = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "curl.exe");
-                    ProcessStartInfo psi = new ProcessStartInfo();
-                    psi.FileName = File.Exists(curl) ? curl : "curl.exe";
-                    psi.Arguments = "-L -f -s --connect-timeout 15 --max-time 180 -o \"" + tmp + "\" \"" + DownloadUrl + "\"";
-                    psi.UseShellExecute = false;
-                    psi.CreateNoWindow = true;
-                    using (Proc p = Proc.Start(psi))
-                    {
-                        if (!p.WaitForExit(200000))
-                        {
-                            Kill(p);
-                        }
-                    }
-                }
-                catch (Exception e)
-                {
-                    ModLog.Info("[SongRequest] curl 下载失败: " + e.Message);
-                }
+                RunDownloader("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -Command \""
+                    + "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12;"
+                    + "Invoke-WebRequest -UseBasicParsing -Uri '" + DownloadUrl + "' -OutFile '" + tmp + "'\"");
             }
             try
             {
@@ -670,6 +644,30 @@ namespace SongRequestMod
                 MelonLogger.Warning("[SongRequest] 保存 cloudflared 失败: " + e.Message);
             }
             return null;
+        }
+
+        private static void RunDownloader(string exe, string args)
+        {
+            try
+            {
+                if (Path.IsPathRooted(exe) && !File.Exists(exe)) return;
+                ProcessStartInfo psi = new ProcessStartInfo();
+                psi.FileName = exe;
+                psi.Arguments = args;
+                psi.UseShellExecute = false;
+                psi.CreateNoWindow = true;
+                using (Proc p = Proc.Start(psi))
+                {
+                    if (!p.WaitForExit(200000))
+                    {
+                        Kill(p);
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                ModLog.Info("[SongRequest] 下载失败(" + Path.GetFileName(exe) + "): " + e.Message);
+            }
         }
 
         // ── 进程收尾: 游戏崩了没来得及关的隧道, 下次启动时按 pid 文件清掉 ──
