@@ -4,10 +4,10 @@ using MelonLoader;
 using HarmonyLib;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(SongRequestMod.Mod), "SongRequest", "1.1.4", "")]
+[assembly: MelonInfo(typeof(SongRequestMod.Mod), "SongRequest", "1.1.5", "")]
 [assembly: MelonGame("sega-interactive", "Sinmai")]
-[assembly: AssemblyVersion("1.1.4.0")]
-[assembly: AssemblyFileVersion("1.1.4.0")]
+[assembly: AssemblyVersion("1.1.5.0")]
+[assembly: AssemblyFileVersion("1.1.5.0")]
 
 namespace SongRequestMod
 {
@@ -33,7 +33,10 @@ namespace SongRequestMod
             {
                 HarmonyInstance.PatchAll(typeof(Patch_SelectOnStart));
                 HarmonyInstance.PatchAll(typeof(Patch_SelectOnRelease));
-                CrashGuard.Install();
+                if (Config.CrashGuardEnabled)
+                {
+                    CrashGuard.Install();   // 兜住游戏自身的 RestoreGhost/CategoryTab* 空引用闪退(默认关, 同原作者 v1.0.4)
+                }
                 ModLog.Info("[SongRequest] Harmony 已挂: MusicSelectProcess.OnStart / OnRelease");
             }
             catch (Exception e)
@@ -192,6 +195,8 @@ namespace SongRequestMod
         public static bool Enable = true;
         public static bool WebEnable = true;
         public static int Port = 8790;
+        /// <summary>游戏崩溃兜底补丁(默认关: 它会吞掉游戏的异常, 可能让游戏带病继续, 反而出现"歌全没了"等异常表现)</summary>
+        public static bool CrashGuardEnabled = false;
         /// <summary>是否同时监听局域网 IP(手机同网访问); 关掉就只有本机能连</summary>
         public static bool LanAccess = true;
         public static bool VerboseLog = false;
@@ -265,6 +270,10 @@ namespace SongRequestMod
                     {
                         if (bool.TryParse(val, out b)) LanAccess = b;
                     }
+                    else if (key == "崩溃保护" || key.Equals("CrashGuard", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (bool.TryParse(val, out b)) CrashGuardEnabled = b;
+                    }
                     else if (key == "详细日志" || key.Equals("VerboseLog", StringComparison.OrdinalIgnoreCase))
                     {
                         if (bool.TryParse(val, out b)) VerboseLog = b;
@@ -295,7 +304,7 @@ namespace SongRequestMod
         {
             try
             {
-                string[] need = { "启用", "网页", "网页端口", "局域网访问", "跳转后进难度画面", "封面服务", "远程分享自动开启", "详细日志" };
+                string[] need = { "启用", "网页", "网页端口", "局域网访问", "跳转后进难度画面", "封面服务", "远程分享自动开启", "崩溃保护", "详细日志" };
                 if (!System.IO.File.Exists(PathFile)) { Save(); return; }
                 string txt = System.IO.File.ReadAllText(PathFile);
                 for (int i = 0; i < need.Length; i++)
@@ -350,6 +359,11 @@ namespace SongRequestMod
                     + "## 首次使用会自动下载 cloudflared.exe 到 Mods\\SongRequestMod\\; 每次开启都换新链接, 关掉后旧链接立即失效\r\n"
                     + "## true(默认): 游戏一启动就自动开启分享, 链接打印在日志里、也显示在本机网页上; false: 只在网页上手动开\r\n"
                     + "远程分享自动开启=" + B(RemoteAutoStart) + "\r\n"
+                    + "\r\n"
+                    + "## ===== 崩溃保护 =====\r\n"
+                    + "## true: 给游戏自身的 RestoreGhost/CategoryTab* 打补丁兜住闪退(例如登录时段位 BOSS 曲目缺失);\r\n"
+                    + "##       注意它会吞掉游戏异常, 如果出现\"歌全没了\"等异常表现请改回 false\r\n"
+                    + "崩溃保护=" + B(CrashGuardEnabled) + "\r\n"
                     + "\r\n"
                     + "## ===== 日志 =====\r\n"
                     + "## false(默认): 只留点歌台地址和报错; true: 过程日志全开\r\n"

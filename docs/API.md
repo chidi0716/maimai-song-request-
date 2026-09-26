@@ -29,10 +29,11 @@
 
 ```json
 {"id":15001,"name":"甘噛みでおねがい","artist":"ピノキオピー、初音ミク","genre":"POPS & ANIME",
- "bpm":138,"version":"1.70","type":"DX","std":false,"dx":true,"alias":["咬","甘噛"],"maxLevel":13,
- "difficulty":[{"type":3,"name":"MASTER","level":13,"levelStr":"13","enable":true,"playable":true}]}
+ "bpm":138,"version":"1.70","type":"DX","std":false,"dx":true,"alias":["咬","甘噛"],"maxLevel":13,"maxConst":13.4,
+ "difficulty":[{"type":3,"name":"MASTER","level":13,"const":13.4,"levelStr":"13","enable":true,"playable":true}]}
 ```
 - `difficulty[].type`: 0=BASIC 1=ADVANCED 2=EXPERT 3=MASTER 4=Re:MASTER
+- `difficulty[].const`: 定数（谱面常数）= `level + levelDecimal/10`，例如 13+ 的谱面是 13.7；`maxConst` 是可玩难度里最高的定数
 - `enable`: XML 声明存在 **且** 游戏认为可玩（`isExistsScore`）；false 时网页置灰
 - `playable`: 仅游戏判断的原始值
 

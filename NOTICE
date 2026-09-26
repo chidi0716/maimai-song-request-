@@ -9,3 +9,9 @@
 - **更新方式**：`tools/update-aliases.ps1`（数据源地址与凭据由维护者自行提供，**不要提交进仓库**）
 
 如需移除或替换：直接编辑 `aliases.txt`（格式见 README），或删除该文件 —— mod 在没有别名库时仍可正常工作，只是不能按别名搜索。
+
+## 简繁 / 日文字形对照表（内嵌于 `page.html`）
+
+- **数据来源**：[OpenCC](https://github.com/BYVoid/OpenCC)（Open Chinese Convert）的 `TSCharacters.txt`（繁体 → 简体）与 `JPShinjitaiCharacters.txt`（日文新字体 → 繁体）
+- **许可**：Apache License 2.0，版权归 OpenCC 作者与贡献者
+- **本项目所做处理**：只取单字对照，合并成「繁体 / 日文字形 → 简体」一张表，供网页搜索时把简体、繁体、日文字形统一后再比较（例：樱 / 櫻 / 桜 互通）
