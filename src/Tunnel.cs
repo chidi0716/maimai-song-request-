@@ -91,7 +91,7 @@ namespace SongRequestMod
                 string exe = FindExe();
                 if (exe == null)
                 {
-                    SetState("downloading", "首次使用, 正在下載 cloudflared(約 50MB)…");
+                    SetState("downloading", "首次使用, 正在下載 cloudflared(約 60MB)…");
                     exe = Download();
                     if (exe == null)
                     {
@@ -310,13 +310,70 @@ namespace SongRequestMod
 
         private static string FindExe()
         {
-            foreach (string p in ExeCandidates())
+            string[] cands = ExeCandidates();
+            for (int i = 0; i < cands.Length; i++)
             {
-                if (File.Exists(p)) return p;
+                string p = cands[i];
+                if (!File.Exists(p)) continue;
+                string why = ExeProblem(p);
+                if (why == null) return p;
+                // 坏掉的 exe(以前的版本会把下载到一半的文件当成完成) -> 我们自己的下载位置就删掉重下, 别的位置只跳过
+                MelonLogger.Warning("[SongRequest] cloudflared.exe 無效(" + why + "): " + p);
+                if (i == 0)
+                {
+                    try { File.Delete(p); } catch { }
+                }
             }
             return null;
         }
 
+        /// <summary>
+        /// 检查是不是完整的 64 位 Windows 程序: MZ 头 -> PE 头 -> 机器类型 x64 -> 每个区段的数据都在文件范围内
+        /// (下载被截断时最后几个区段会落到文件外)。没问题返回 null, 否则返回原因。
+        /// </summary>
+        private static string ExeProblem(string path)
+        {
+            try
+            {
+                using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (BinaryReader br = new BinaryReader(fs))
+                {
+                    long len = fs.Length;
+                    if (len < 4 * 1024 * 1024) return "檔案太小 " + len + " bytes";
+                    if (br.ReadUInt16() != 0x5A4D) return "不是 Windows 執行檔";
+                    fs.Position = 0x3C;
+                    int pe = br.ReadInt32();
+                    if (pe <= 0 || pe > len - 24) return "檔頭損壞";
+                    fs.Position = pe;
+                    if (br.ReadUInt32() != 0x00004550) return "檔頭損壞";
+                    ushort machine = br.ReadUInt16();
+                    if (machine != 0x8664) return "不是 64 位元版本(machine=0x" + machine.ToString("X") + ")";
+                    ushort sections = br.ReadUInt16();
+                    fs.Position = pe + 20;
+                    ushort optSize = br.ReadUInt16();
+                    long table = pe + 24 + optSize;
+                    for (int i = 0; i < sections; i++)
+                    {
+                        fs.Position = table + i * 40 + 16;
+                        long rawSize = br.ReadUInt32();
+                        long rawPtr = br.ReadUInt32();
+                        if (rawSize > 0 && rawPtr + rawSize > len) return "檔案不完整(下載被中斷)";
+                    }
+                }
+                return null;
+            }
+            catch (Exception e)
+            {
+                return "讀取失敗: " + e.Message;
+            }
+        }
+
+        /// <summary>
+        /// 下载 cloudflared。交给外部进程(不能在游戏进程里改 ServicePointManager.SecurityProtocol, 那是全进程设置)。
+        ///   - curl: 不设总时长, 只在"每秒不到 2KB 持续 60 秒"时判定卡住; 断了用 -C - 接着下, 最多 3 次
+        ///   - 没有 curl 才用 PowerShell(关掉进度条, 不然 Invoke-WebRequest 会慢好几倍)
+        ///   - 退出码不是 0 或文件不完整都不算成功(以前下载到一半被掐断也会被当成完成)
+        /// </summary>
         private static string Download()
         {
             string dst = ExeCandidates()[0];
@@ -324,34 +381,45 @@ namespace SongRequestMod
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(dst));
-                if (File.Exists(tmp)) File.Delete(tmp);
             }
             catch
             {
             }
-            // 交给外部进程下载: 不能在游戏进程里改 ServicePointManager.SecurityProtocol,
-            // 那是全进程的设置, 会连带影响游戏自己跟服务器的 HTTPS 通信
-            // 1) Windows 10+ 自带的 curl.exe
-            RunDownloader(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "curl.exe"),
-                "-L -f -s --connect-timeout 15 --max-time 180 -o \"" + tmp + "\" \"" + DownloadUrl + "\"");
-            // 2) 没有 curl 就用 PowerShell
-            if (!File.Exists(tmp))
+            string curl = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "curl.exe");
+            // 上次已经下完(只是没来得及改名) -> 直接用
+            bool ok = File.Exists(tmp) && ExeProblem(tmp) == null;
+            if (!ok && File.Exists(curl))
             {
-                RunDownloader("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -Command \""
+                for (int attempt = 0; attempt < 3 && !ok && StillStarting(); attempt++)
+                {
+                    int code = RunDownloader(curl, "-L -f -s -C - --connect-timeout 15 --speed-limit 2048 --speed-time 60 -o \""
+                        + tmp + "\" \"" + DownloadUrl + "\"", tmp);
+                    ok = code == 0 && ExeProblem(tmp) == null;
+                    if (!ok) ModLog.Info("[SongRequest] curl 下載第 " + (attempt + 1) + " 次未完成(結束碼 " + code + ")");
+                    if (code == 0 && !ok) DeleteQuietly(tmp);   // 下完了但不是正确的程序 -> 删掉重来, 别再接着续
+                }
+            }
+            // 只有没有 curl(老系统)才用 PowerShell; curl 试了 3 次都不行多半是网络问题, 换 PowerShell 也没用还会丢掉已下载的部分
+            if (!ok && !File.Exists(curl) && StillStarting())
+            {
+                DeleteQuietly(tmp);   // PowerShell 不能续传, 从头下
+                int code = RunDownloader("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -Command \""
+                    + "$ProgressPreference='SilentlyContinue';"
                     + "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12;"
-                    + "Invoke-WebRequest -UseBasicParsing -Uri '" + DownloadUrl + "' -OutFile '" + tmp + "'\"");
+                    + "try{Invoke-WebRequest -UseBasicParsing -Uri '" + DownloadUrl + "' -OutFile '" + tmp + "';exit 0}catch{exit 1}\"", tmp);
+                ok = code == 0 && ExeProblem(tmp) == null;
+                if (code == 0 && !ok) DeleteQuietly(tmp);
             }
             try
             {
-                // 正常的 exe 有几十 MB, 太小说明拿到的是错误页
-                if (File.Exists(tmp) && new FileInfo(tmp).Length > 1000000)
+                if (ok)
                 {
                     if (File.Exists(dst)) File.Delete(dst);
                     File.Move(tmp, dst);
                     ModLog.Always("[SongRequest] cloudflared 已下載: " + dst);
                     return dst;
                 }
-                if (File.Exists(tmp)) File.Delete(tmp);
+                // 没下完的 .download 留着: 下次开启分享时 curl 会接着下
             }
             catch (Exception e)
             {
@@ -360,11 +428,26 @@ namespace SongRequestMod
             return null;
         }
 
-        private static void RunDownloader(string exe, string args)
+        /// <summary>分享还在开启中(没被用户关掉、也没失败)</summary>
+        private static bool StillStarting()
+        {
+            lock (_lock)
+            {
+                return _state == "starting" || _state == "downloading";
+            }
+        }
+
+        private static void DeleteQuietly(string path)
+        {
+            try { if (File.Exists(path)) File.Delete(path); } catch { }
+        }
+
+        /// <summary>跑下载进程, 每秒把已下载大小报到分享面板; 用户关闭分享就停掉。返回退出码(-1 = 没跑成/被停)</summary>
+        private static int RunDownloader(string exe, string args, string tmp)
         {
             try
             {
-                if (Path.IsPathRooted(exe) && !File.Exists(exe)) return;
+                if (Path.IsPathRooted(exe) && !File.Exists(exe)) return -1;
                 ProcessStartInfo psi = new ProcessStartInfo();
                 psi.FileName = exe;
                 psi.Arguments = args;
@@ -372,15 +455,26 @@ namespace SongRequestMod
                 psi.CreateNoWindow = true;
                 using (Proc p = Proc.Start(psi))
                 {
-                    if (!p.WaitForExit(200000))
+                    int started = Environment.TickCount;
+                    while (!p.WaitForExit(1000))
                     {
-                        Kill(p);
+                        if (!StillStarting() || unchecked(Environment.TickCount - started) > 30 * 60 * 1000)
+                        {
+                            Kill(p);
+                            return -1;
+                        }
+                        long got = 0;
+                        try { if (File.Exists(tmp)) got = new FileInfo(tmp).Length; } catch { }
+                        SetState("downloading", "首次使用, 正在下載 cloudflared(約 60MB)… 已下載 "
+                            + (got / 1048576.0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " MB");
                     }
+                    return p.ExitCode;
                 }
             }
             catch (Exception e)
             {
                 ModLog.Info("[SongRequest] 下載失敗(" + Path.GetFileName(exe) + "): " + e.Message);
+                return -1;
             }
         }
 
