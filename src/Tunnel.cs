@@ -57,7 +57,7 @@ namespace SongRequestMod
                     return;
                 }
                 _state = "starting";
-                _msg = "正在启动隧道…";
+                _msg = "正在啟動通道…";
                 _baseUrl = null;
                 _key = NewKey();
                 _lastLine = "";
@@ -91,19 +91,19 @@ namespace SongRequestMod
                 string exe = FindExe();
                 if (exe == null)
                 {
-                    SetState("downloading", "首次使用, 正在下载 cloudflared(约 50MB)…");
+                    SetState("downloading", "首次使用, 正在下載 cloudflared(約 50MB)…");
                     exe = Download();
                     if (exe == null)
                     {
-                        SetState("error", "下载 cloudflared 失败。请手动下载 " + DownloadUrl
-                            + " 并改名为 cloudflared.exe 放到 " + ExeCandidates()[0]);
+                        SetState("error", "下載 cloudflared 失敗。請手動下載 " + DownloadUrl
+                            + " 並改名為 cloudflared.exe 放到 " + ExeCandidates()[0]);
                         return;
                     }
                     lock (_lock)
                     {
                         if (_state != "downloading") return;   // 下载途中用户点了关闭
                     }
-                    SetState("starting", "正在启动隧道…");
+                    SetState("starting", "正在啟動通道…");
                 }
 
                 // 先用默认协议(QUIC/UDP); 有的网络挡 UDP, 连不上就换 HTTP2(TCP) 再试一次
@@ -112,7 +112,7 @@ namespace SongRequestMod
                 {
                     if (a > 0)
                     {
-                        SetState("starting", "默认线路连不上, 改用 TCP 线路重试…");
+                        SetState("starting", "預設線路連不上, 改用 TCP 線路重試…");
                     }
                     bool? ok = TryStart(exe, protocols[a]);
                     if (ok != false)
@@ -120,11 +120,11 @@ namespace SongRequestMod
                         return;   // true: 成功; null: 用户中途关闭
                     }
                 }
-                SetState("error", "连不上 Cloudflare, 请检查网络(需要能访问外网 7844 端口)后重试。" + _lastLine);
+                SetState("error", "連不上 Cloudflare, 請檢查網路(需要能連到外網 7844 埠)後重試。" + _lastLine);
             }
             catch (Exception e)
             {
-                SetState("error", "启动隧道失败: " + e.Message);
+                SetState("error", "啟動通道失敗: " + e.Message);
             }
         }
 
@@ -194,7 +194,7 @@ namespace SongRequestMod
                     {
                         if (line.IndexOf(" ERR ", StringComparison.Ordinal) >= 0)
                         {
-                            _lastLine = " 最后错误: " + line.Trim();
+                            _lastLine = " 最後錯誤: " + line.Trim();
                         }
                         ModLog.Info("[SongRequest] cloudflared: " + line);
                         Match m = UrlRe.Match(line);
@@ -224,7 +224,7 @@ namespace SongRequestMod
                         }
                         if (share != null)
                         {
-                            ModLog.Always("[SongRequest] 远程分享已开启: " + share);
+                            ModLog.Always("[SongRequest] 遠端分享已開啟: " + share);
                         }
                     }
                 }
@@ -248,7 +248,7 @@ namespace SongRequestMod
                 if (_proc.HasExited)
                 {
                     _state = "error";
-                    _msg = "隧道已断开(cloudflared 退出), 请重新开启分享";
+                    _msg = "通道已斷開(cloudflared 退出), 請重新開啟分享";
                     _baseUrl = null;
                     _key = null;
                     _proc = null;
@@ -267,7 +267,7 @@ namespace SongRequestMod
                 _state = state;
                 _msg = msg;
             }
-            if (state == "error") MelonLogger.Warning("[SongRequest] 远程分享: " + msg);
+            if (state == "error") MelonLogger.Warning("[SongRequest] 遠端分享: " + msg);
         }
 
         /// <summary>访问密钥: 16 字节随机数, URL 安全的 base64</summary>
@@ -348,14 +348,14 @@ namespace SongRequestMod
                 {
                     if (File.Exists(dst)) File.Delete(dst);
                     File.Move(tmp, dst);
-                    ModLog.Always("[SongRequest] cloudflared 已下载: " + dst);
+                    ModLog.Always("[SongRequest] cloudflared 已下載: " + dst);
                     return dst;
                 }
                 if (File.Exists(tmp)) File.Delete(tmp);
             }
             catch (Exception e)
             {
-                MelonLogger.Warning("[SongRequest] 保存 cloudflared 失败: " + e.Message);
+                MelonLogger.Warning("[SongRequest] 儲存 cloudflared 失敗: " + e.Message);
             }
             return null;
         }
@@ -380,7 +380,7 @@ namespace SongRequestMod
             }
             catch (Exception e)
             {
-                ModLog.Info("[SongRequest] 下载失败(" + Path.GetFileName(exe) + "): " + e.Message);
+                ModLog.Info("[SongRequest] 下載失敗(" + Path.GetFileName(exe) + "): " + e.Message);
             }
         }
 

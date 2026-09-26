@@ -1,19 +1,19 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-TW">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SongRequestMod · 游玩状态浮层</title>
+<title>SongRequestMod · 遊玩狀態浮層</title>
 <!--
-  给 OBS「浏览器源」用的透明浮层: 只显示 曲名/难度/Combo/分数/判定。
-  数据来自 GET /api/nowplaying (500ms 轮询)。
-  背景默认透明, 直接加到 OBS 里即可; body 背景可自己改。
+  給 OBS「瀏覽器源」用的透明浮層: 只顯示 曲名/難度/Combo/分數/判定。
+  資料來自 GET /api/nowplaying (500ms 輪詢)。
+  背景預設透明, 直接加到 OBS 裡即可; body 背景可自己改。
 -->
 <style>
   :root{ --pink:#ff5ca0; --cyan:#39d7ff; --gold:#ffb428; }
   *{ box-sizing:border-box; }
   html,body{ margin:0; padding:0; background:transparent; }
-  body{ font:14px/1.45 system-ui,"Segoe UI","Microsoft YaHei",sans-serif; color:#fff;
+  body{ font:14px/1.45 system-ui,"Segoe UI","Microsoft JhengHei","Microsoft YaHei",sans-serif; color:#fff;
         text-shadow:0 2px 6px rgba(0,0,0,.75); padding:8px; }
   #wrap{ width:360px; }
   #wrap.hide{ display:none; }
@@ -39,7 +39,7 @@
 </head>
 <body>
 <div id="wrap">
-  <div id="idle">未在游玩</div>
+  <div id="idle">未在遊玩</div>
   <div id="play" style="display:none">
     <div><span id="song"></span><span id="diff"></span></div>
     <div id="artist"></div>
@@ -69,7 +69,7 @@
   var errShown = false;
 
   function showErr(msg){
-    $('err').textContent = '读不到游戏状态: ' + msg;
+    $('err').textContent = '讀不到遊戲狀態: ' + msg;
     $('err').style.display = 'block';
   }
 
@@ -78,7 +78,7 @@
     if (!playing || !d.id){
       $('idle').style.display = 'block';
       $('play').style.display = 'none';
-      $('idle').textContent = (d && d.state === 'select') ? '选曲中: ' + (d.name || '') : '未在游玩';
+      $('idle').textContent = (d && d.state === 'select') ? '選曲中: ' + (d.name || '') : '未在遊玩';
       return;
     }
     $('idle').style.display = 'none';

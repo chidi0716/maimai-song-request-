@@ -49,7 +49,7 @@ namespace SongRequestMod
                     }
                     // 某个局域网 IP 绑不上(网卡刚换 IP / 被别的程序占着)会让整个 Start 失败, 连本机都打不开 ->
                     // 退一步只开本机, 至少电脑上能用
-                    MelonLogger.Warning("[SongRequest] 局域网地址绑定失败, 只开本机访问: " + e1.Message);
+                    MelonLogger.Warning("[SongRequest] 區域網路位址綁定失敗, 只開放本機存取: " + e1.Message);
                     lans = new List<string>();
                     _listener = Listen(port, lans);
                 }
@@ -67,17 +67,17 @@ namespace SongRequestMod
                 {
                     for (int i = 0; i < _lanUrls.Count; i++)
                     {
-                        lanTxt += (i == 0 ? "    手机(同网): http://" : " 或 http://") + _lanUrls[i] + ":" + port + "/";
+                        lanTxt += (i == 0 ? "    手機(同網): http://" : " 或 http://") + _lanUrls[i] + ":" + port + "/";
                     }
                 }
                 ModLog.Always("[SongRequest] v" + typeof(Web).Assembly.GetName().Version
-                    + "  本机: http://127.0.0.1:" + port + "/" + lanTxt);
+                    + "  本機: http://127.0.0.1:" + port + "/" + lanTxt);
                 return true;
             }
             catch (Exception e)
             {
-                MelonLogger.Error("[SongRequest] 启动点歌台失败(端口 " + port + " 可能被占用, 常见原因是上次游戏没关干净,"
-                    + " 在任务管理器结束残留的 Sinmai 后重开; 或改 SongRequestMod.toml 的「网页端口」): " + e.Message);
+                MelonLogger.Error("[SongRequest] 啟動點歌台失敗(埠 " + port + " 可能被佔用, 常見原因是上次遊戲沒關乾淨,"
+                    + " 在工作管理員結束殘留的 Sinmai 後重開; 或改 SongRequestMod.toml 的「网页端口」): " + e.Message);
                 return false;
             }
         }
@@ -151,7 +151,7 @@ namespace SongRequestMod
                 {
                     try
                     {
-                        ReplyJson(ctx, "{\"ok\":false,\"msg\":" + Q("服务端异常: " + e.Message) + "}", 500);
+                        ReplyJson(ctx, "{\"ok\":false,\"msg\":" + Q("伺服器異常: " + e.Message) + "}", 500);
                     }
                     catch
                     {
@@ -182,7 +182,7 @@ namespace SongRequestMod
                 }
                 if (path == "/api/selftest" || path == "/api/selfcheck" || path.StartsWith("/api/remote"))
                 {
-                    ReplyJson(ctx, "{\"ok\":false,\"msg\":\"远程访问不能使用此接口\"}", 403);
+                    ReplyJson(ctx, "{\"ok\":false,\"msg\":\"遠端存取不能使用此功能\"}", 403);
                     return;
                 }
             }
@@ -191,7 +191,7 @@ namespace SongRequestMod
             if (!Mod.Ready && (path == "/api/songs" || path == "/jacket" || path == "/api/play"
                 || path == "/api/random" || path == "/api/selftest"))
             {
-                ReplyJson(ctx, "{\"ok\":false,\"msg\":\"游戏数据加载中, 请稍候再试\"}", 503);
+                ReplyJson(ctx, "{\"ok\":false,\"msg\":\"遊戲資料載入中, 請稍候再試\"}", 503);
                 return;
             }
             if (path == "/api/songs")
@@ -243,7 +243,7 @@ namespace SongRequestMod
             if (path == "/api/selfcheck")
             {
                 ReplyJson(ctx, MainThread.Run(SelectDriver.Diagnostics, 3000,
-                    "{\"ok\":false,\"msg\":\"主线程忙或游戏数据还没就绪, 请稍后再试\"}"));
+                    "{\"ok\":false,\"msg\":\"主執行緒忙或遊戲資料還沒就緒, 請稍後再試\"}"));
                 return;
             }
             if (path == "/api/selftest")
@@ -252,7 +252,7 @@ namespace SongRequestMod
                 int tid = Int(Query(ctx.Request.Url.Query, "id"), 15001);
                 int tdiff = Int(Query(ctx.Request.Url.Query, "diff"), 3);
                 SelectDriver.ArmAutoTest(tid, tdiff);
-                ReplyJson(ctx, "{\"ok\":true,\"msg\":" + Q("已布防: 进选曲界面自动点 " + tid) + "}");
+                ReplyJson(ctx, "{\"ok\":true,\"msg\":" + Q("已佈防: 進選曲介面自動點 " + tid) + "}");
                 return;
             }
             if (path == "/api/play" && method == "POST")
@@ -312,19 +312,19 @@ namespace SongRequestMod
             ReplyJson(ctx, "{\"ok\":false,\"msg\":" + Q("no route: " + path) + "}", 404);
         }
 
-        /// <summary>点歌结果: "已跳转…" 算成功; 被后面的点歌取代的标 superseded(网页不当错误提示)</summary>
+        /// <summary>点歌结果: "已跳轉…" 算成功; 被后面的点歌取代的标 superseded(网页不当错误提示)</summary>
         private static void ReplyPlay(HttpListenerContext ctx, string msg)
         {
             if (msg == null)
             {
-                msg = "点歌超时: 游戏主线程没有响应";
+                msg = "點歌逾時: 遊戲主執行緒沒有回應";
             }
             bool superseded = msg.StartsWith(SelectDriver.SupersededPrefix, StringComparison.Ordinal);
             if (superseded)
             {
                 msg = msg.Substring(SelectDriver.SupersededPrefix.Length);
             }
-            bool ok = msg.StartsWith("已跳转", StringComparison.Ordinal);
+            bool ok = msg.StartsWith("已跳轉", StringComparison.Ordinal);
             ReplyJson(ctx, "{\"ok\":" + (ok ? "true" : "false") + (superseded ? ",\"superseded\":true" : "")
                 + ",\"msg\":" + Q(msg) + "}");
         }
@@ -405,21 +405,21 @@ namespace SongRequestMod
                     {
                         _pages[name] = nc;
                     }
-                    ModLog.Info("[SongRequest] 页面已加载: " + p + " (" + txt.Length + " 字符)");
+                    ModLog.Info("[SongRequest] 頁面已載入: " + p + " (" + txt.Length + " 字元)");
                     return txt;
                 }
-                ModLog.Info("[SongRequest] 页面文件没找到: " + name + " (找过 "
-                    + Path.Combine(GameDir, "Mods", "SongRequestMod", name) + " 等 4 个位置)");
+                ModLog.Info("[SongRequest] 頁面檔案沒找到: " + name + " (找過 "
+                    + Path.Combine(GameDir, "Mods", "SongRequestMod", name) + " 等 4 個位置)");
             }
             catch (Exception e)
             {
-                MelonLogger.Warning("[SongRequest] 读页面失败: " + e.Message);
+                MelonLogger.Warning("[SongRequest] 讀頁面失敗: " + e.Message);
             }
             // 磁盘上没找到 -> 用内嵌在 dll 里的那份(这样只丢一个 dll 也能用)
             string embedded = ReadEmbedded("SongRequestMod." + name);
             if (embedded != null)
             {
-                ModLog.Info("[SongRequest] 页面用内嵌版本: " + name + " (" + embedded.Length + " 字符)");
+                ModLog.Info("[SongRequest] 頁面用內嵌版本: " + name + " (" + embedded.Length + " 字元)");
                 return embedded;
             }
             return Fallback(name);
@@ -427,7 +427,7 @@ namespace SongRequestMod
 
         /// <summary>
         /// 经 cloudflared 隧道进来的请求: TCP 上看是 127.0.0.1, 但 Cloudflare 一定会带上这些头。
-        /// (本机/局域网的人自己伪造这些头只会把自己降级成"远程", 不会多拿权限)
+        /// (本机/局域网的人自己伪造这些头只会把自己降级成"遠端", 不会多拿权限)
         /// </summary>
         private static bool IsRemote(HttpListenerRequest r)
         {
@@ -459,8 +459,8 @@ namespace SongRequestMod
             return "<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
                 + "<title>SongRequestMod</title>"
                 + "<body style=\"background:#0e1120;color:#e6e9f2;font:14px/1.6 system-ui,sans-serif;padding:24px\">"
-                + "<h2>分享链接无效或已过期</h2>"
-                + "<p>请向主播索取最新的点歌链接(每次重新开启分享都会换新链接)。</p></body>";
+                + "<h2>分享連結無效或已過期</h2>"
+                + "<p>請向主播索取最新的點歌連結(每次重新開啟分享都會換新連結)。</p></body>";
         }
 
         private static string Fallback(string name)
@@ -471,9 +471,9 @@ namespace SongRequestMod
             }
             return "<!doctype html><meta charset=\"utf-8\"><title>SongRequestMod</title>"
                 + "<body style=\"background:#0e1120;color:#e6e9f2;font:14px/1.6 system-ui,sans-serif;padding:24px\">"
-                + "<h2>点歌台页面文件缺失</h2>"
+                + "<h2>點歌台頁面檔案缺失</h2>"
                 + "<p>把 <code>page.html</code> 放到 <code>" + GameDir + "\\Mods\\SongRequestMod\\page.html</code> 即可。</p>"
-                + "<p>接口仍然可用: <a style=\"color:#ff5ca0\" href=\"/api/songs\">/api/songs</a> · "
+                + "<p>API 仍然可用: <a style=\"color:#ff5ca0\" href=\"/api/songs\">/api/songs</a> · "
                 + "<a style=\"color:#ff5ca0\" href=\"/api/nowplaying\">/api/nowplaying</a></p></body>";
         }
 
@@ -513,7 +513,7 @@ namespace SongRequestMod
             }
             catch (Exception e)
             {
-                MelonLogger.Warning("[SongRequest] 读内嵌资源失败 " + logicalName + ": " + e.Message);
+                MelonLogger.Warning("[SongRequest] 讀內嵌資源失敗 " + logicalName + ": " + e.Message);
                 return null;
             }
         }
@@ -527,16 +527,16 @@ namespace SongRequestMod
             {
                 for (int i = 0; i < _lanUrls.Count; i++)
                 {
-                    lanTxt += (i == 0 ? "    手机(同网): http://" : " 或 http://") + _lanUrls[i] + ":" + port + "/";
+                    lanTxt += (i == 0 ? "    手機(同網): http://" : " 或 http://") + _lanUrls[i] + ":" + port + "/";
                 }
             }
-            ModLog.Always("[SongRequest] 点歌台: http://127.0.0.1:" + port + "/" + lanTxt);
+            ModLog.Always("[SongRequest] 點歌台: http://127.0.0.1:" + port + "/" + lanTxt);
         }
 
         /// <summary>
         /// 一个 SSE 连接。以前是主线程直接往所有连接里 Write —— 只要有一个客户端不收数据
         /// (手机锁屏 / 切后台 / 网络卡住 / 隧道对端流控), TCP 发送缓冲写满后 Write 就会一直阻塞,
-        /// 游戏主线程跟着卡死("没有回应")。现在每个连接一条写线程, 主线程只把最新状态放进 Pending
+        /// 游戏主线程跟着卡死("沒有回應")。现在每个连接一条写线程, 主线程只把最新状态放进 Pending
         /// (旧的没发出去就直接被新的覆盖), 写卡住超过 10 秒的连接直接掐掉。
         /// </summary>
         private sealed class SseClient
@@ -578,11 +578,11 @@ namespace SongRequestMod
                 Thread th = new Thread(() => SseWriter(c));
                 th.IsBackground = true;
                 th.Start();
-                ModLog.Info("[SongRequest] SSE 客户端接入, 当前 " + _sse.Count + " 个");
+                ModLog.Info("[SongRequest] SSE 客戶端接入, 目前 " + _sse.Count + " 個");
             }
             catch (Exception e)
             {
-                ModLog.Info("[SongRequest] SSE 建立失败: " + e.Message);
+                ModLog.Info("[SongRequest] SSE 建立失敗: " + e.Message);
             }
         }
 
@@ -627,7 +627,7 @@ namespace SongRequestMod
             catch
             {
             }
-            ModLog.Info("[SongRequest] SSE 断开清理, 剩 " + _sse.Count + " 个");
+            ModLog.Info("[SongRequest] SSE 斷開清理, 剩 " + _sse.Count + " 個");
         }
 
         /// <summary>
@@ -642,7 +642,7 @@ namespace SongRequestMod
                 IAsyncResult ar = os.BeginWrite(buf, 0, buf.Length, null, null);
                 if (!ar.AsyncWaitHandle.WaitOne(SseStuckMs))
                 {
-                    throw new IOException("SSE 客户端 " + SseStuckMs + "ms 没收数据");
+                    throw new IOException("SSE 客戶端 " + SseStuckMs + "ms 沒收資料");
                 }
                 os.EndWrite(ar);
                 os.Flush();
@@ -742,7 +742,7 @@ namespace SongRequestMod
             }
             catch (Exception e)
             {
-                MelonLogger.Warning("[SongRequest] 取本机 IP 失败: " + e.Message);
+                MelonLogger.Warning("[SongRequest] 取本機 IP 失敗: " + e.Message);
             }
             if (ips.Count == 0)
             {
