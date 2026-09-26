@@ -20,8 +20,10 @@ namespace SongRequestMod
     ///   CurrentCategorySelect / CurrentMusicSelect / ScoreType / CurrentDifficulty / DifficultySelectIndex
     ///   ChangeBGM() / CombineMusicDataList / MonitorArray[i].SetScrollMusicCard|SetScrollGenreCard|OutGenreTab
     /// 换画面: 子序列数组切到 SubSequence.Difficulty(=3, 难度选择画面)。
-    /// 注: 游戏里 `Process.SubSequence` 既是枚举名又是命名空间名(SequenceBase 在那个命名空间里),
-    /// 静态引用必撞, 所以子序列那几个 private 数组一律反射拿、反射调, 不给编译器机会。
+    /// 子序列那几个 private 数组用 AccessTools.FieldRefAccess 拿有类型的引用(字段名/类型不对会在第一次进选曲界面时
+    /// 明确报错, 不会像反射那样静默拿到 null); 枚举写全名 MusicSelectProcess.SubSequence, 命名空间写
+    /// global::Process.SubSequence, 两个同名的 SubSequence 就不会撞。只有 _mainSequence 是游戏的私有枚举类型,
+    /// 外部没法引用, 只能反射读成 int。
     /// </summary>
     [HarmonyPatch(typeof(MusicSelectProcess), "OnStart")]
     internal static class Patch_SelectOnStart
@@ -61,14 +63,16 @@ namespace SongRequestMod
         internal const string SupersededPrefix = "SUPERSEDED:";
 
         private static MusicSelectProcess _process;
-        private static Array _subSeqArray;    // SequenceBase[player][]
-        private static Array _curSeq;         // SubSequence[player]
-        private static Array _prevSeq;        // SubSequence[player]
-        private static FieldInfo _fSubSeqArray;
-        private static FieldInfo _fCurSeq;
-        private static FieldInfo _fPrevSeq;
+        private static global::Process.SubSequence.SequenceBase[][] _subSeqArray;   // [player][子序列]
+        private static MusicSelectProcess.SubSequence[] _curSeq;                    // [player]
+        private static MusicSelectProcess.SubSequence[] _prevSeq;                   // [player]
+        private static AccessTools.FieldRef<MusicSelectProcess, global::Process.SubSequence.SequenceBase[][]> _refSubSeqArray;
+        private static AccessTools.FieldRef<MusicSelectProcess, MusicSelectProcess.SubSequence[]> _refCurSeq;
+        private static AccessTools.FieldRef<MusicSelectProcess, MusicSelectProcess.SubSequence[]> _refPrevSeq;
         private static FieldInfo _fMainSeq;
-        private static MethodInfo _mSyncNext;
+        /// <summary>游戏自己切子画面用的 SyncNext(SubSequence): Reset 当前 -> 记 before -> 切过去 -> OnStartSequence, 所有玩家一起</summary>
+        private static Action<MusicSelectProcess, MusicSelectProcess.SubSequence> _syncNext;
+        private static bool _refsReady;
         /// <summary>主线程每帧更新的"在不在选曲界面"(给网页线程读, 网页线程不能自己去查游戏对象)</summary>
         private static volatile bool _inSelectCached;
 
@@ -153,23 +157,27 @@ namespace SongRequestMod
             ResetPlayableCache();
             try
             {
-                if (_fSubSeqArray == null)
+                if (!_refsReady)
                 {
-                    _fSubSeqArray = AccessTools.Field(typeof(MusicSelectProcess), "_subSequenceArray");
-                    _fCurSeq = AccessTools.Field(typeof(MusicSelectProcess), "_currentPlayerSubSequence");
-                    _fPrevSeq = AccessTools.Field(typeof(MusicSelectProcess), "_beforePlayerSubSequence");
+                    _refsReady = true;
+                    _refSubSeqArray = AccessTools.FieldRefAccess<MusicSelectProcess, global::Process.SubSequence.SequenceBase[][]>("_subSequenceArray");
+                    _refCurSeq = AccessTools.FieldRefAccess<MusicSelectProcess, MusicSelectProcess.SubSequence[]>("_currentPlayerSubSequence");
+                    _refPrevSeq = AccessTools.FieldRefAccess<MusicSelectProcess, MusicSelectProcess.SubSequence[]>("_beforePlayerSubSequence");
                     _fMainSeq = AccessTools.Field(typeof(MusicSelectProcess), "_mainSequence");
-                    // 游戏自己切子画面用的 SyncNext(SubSequence): Reset 当前 -> 记 before -> 切过去 -> OnStartSequence, 所有玩家一起
-                    _mSyncNext = AccessTools.Method(typeof(MusicSelectProcess), "SyncNext");
+                    _syncNext = AccessTools.MethodDelegate<Action<MusicSelectProcess, MusicSelectProcess.SubSequence>>(
+                        AccessTools.Method(typeof(MusicSelectProcess), "SyncNext"));
                 }
-                _subSeqArray = _fSubSeqArray == null ? null : (Array)_fSubSeqArray.GetValue(process);
-                _curSeq = _fCurSeq == null ? null : (Array)_fCurSeq.GetValue(process);
-                _prevSeq = _fPrevSeq == null ? null : (Array)_fPrevSeq.GetValue(process);
+                _subSeqArray = _refSubSeqArray(process);
+                _curSeq = _refCurSeq(process);
+                _prevSeq = _refPrevSeq(process);
             }
             catch (Exception e)
             {
-                MelonLogger.Warning("[SongRequest] 取子序列数组失败(不影响点歌, 只是不会自动跳难度画面): " + e.Message);
+                MelonLogger.Warning("[SongRequest] 取选曲子序列失败(不影响点歌, 只是不会自动跳难度画面): " + e.Message);
                 _subSeqArray = null;
+                _curSeq = null;
+                _prevSeq = null;
+                _syncNext = null;
             }
             ModLog.Info("[SongRequest] MusicSelectProcess 已捕获, 曲目分类 "
                 + (process.CombineMusicDataList == null ? -1 : process.CombineMusicDataList.Count) + " 组, 子序列="
@@ -708,7 +716,7 @@ namespace SongRequestMod
                         {
                             continue;
                         }
-                        int cur = Convert.ToInt32(_curSeq.GetValue(p));
+                        int cur = (int)_curSeq[p];
                         if (cur != SubSeqMusic && cur != SubSeqDifficulty && cur != SubSeqUtageDifficulty)
                         {
                             string where = cur >= 0 && cur < SubSeqNames.Length ? SubSeqNames[cur] : ("画面 " + cur);
@@ -735,7 +743,7 @@ namespace SongRequestMod
                 }
                 for (int p = 0; p < _curSeq.Length && p < _process.MonitorArray.Length; p++)
                 {
-                    int cur = Convert.ToInt32(_curSeq.GetValue(p));
+                    int cur = (int)_curSeq[p];
                     if (IsEntry(p) && (cur == SubSeqDifficulty || cur == SubSeqUtageDifficulty))
                     {
                         return true;
@@ -751,12 +759,11 @@ namespace SongRequestMod
         /// <summary>调游戏自己的 SyncNext(子画面)</summary>
         private static bool SyncNext(int subSeq)
         {
-            if (_mSyncNext == null || _curSeq == null)
+            if (_syncNext == null || _curSeq == null)
             {
                 return false;
             }
-            System.Type enumType = _curSeq.GetType().GetElementType();
-            _mSyncNext.Invoke(_process, new object[] { Enum.ToObject(enumType, subSeq) });
+            _syncNext(_process, (MusicSelectProcess.SubSequence)subSeq);
             return true;
         }
 
@@ -826,7 +833,7 @@ namespace SongRequestMod
                 // 再写难度(UI 每帧读 GetCurrentDifficulty -> 会把难度条刷到我们指定的那个)
                 int applied = ApplyDifficulty(realId, difficulty);
 
-                if (Config.JumpToDifficultyScreen && _mSyncNext != null)
+                if (Config.JumpToDifficultyScreen && _syncNext != null)
                 {
                     // 跟游戏自己确认选曲时一样: 收起曲目卡/分类页签、换按钮图、锁输入, 下一帧切到难度画面
                     Monitor.MusicSelectMonitor first = null;

@@ -1349,8 +1349,11 @@ namespace SongRequestMod
 
             string[] levelStr = new string[5];
             int[] levelNum = new int[5];
+            // 定数(谱面常数): level + levelDecimal/10, 例如 13+ 的谱面是 13.7。以 0.1 为单位存成整数, 免得浮点误差
+            int[] const10 = new int[5];
             bool[] enable = new bool[5];
             int maxLevel = -1;
+            int maxConst10 = -1;
             if (md.notesData != null)
             {
                 // 难度看 notesData 的位置(0=Basic .. 4=Re:Master), 不是 notesType ——
@@ -1367,9 +1370,14 @@ namespace SongRequestMod
                     enable[d] = nt.isEnable;
                     levelStr[d] = LevelStr(nt);
                     levelNum[d] = ParseLevel(levelStr[d], nt.level);
+                    const10[d] = nt.level * 10 + Math.Max(0, Math.Min(9, nt.levelDecimal));
                     if (nt.isEnable && levelNum[d] > maxLevel)
                     {
                         maxLevel = levelNum[d];
+                    }
+                    if (nt.isEnable && const10[d] > maxConst10)
+                    {
+                        maxConst10 = const10[d];
                     }
                 }
             }
@@ -1389,6 +1397,7 @@ namespace SongRequestMod
                 sb.Append(']');
             }
             sb.Append(",\"maxLevel\":").Append(maxLevel < 0 ? 0 : maxLevel);
+            sb.Append(",\"maxConst\":").Append(Const(maxConst10 < 0 ? 0 : maxConst10));
             // enable = XML 声明 且 游戏认为可玩(选曲数据的 isExistsScore)。
             // 只信 XML 会出现"点了 14+ 跳到 14"—— 谱面文件缺失/版本没同步时游戏自己会降档。
             bool[] playable = new bool[5];
@@ -1411,6 +1420,7 @@ namespace SongRequestMod
                 sb.Append("{\"type\":").Append(d);
                 sb.Append(",\"name\":\"").Append(DiffNames[d]).Append('"');
                 sb.Append(",\"level\":").Append(levelNum[d]);
+                sb.Append(",\"const\":").Append(Const(const10[d]));
                 sb.Append(",\"levelStr\":");
                 Esc(sb, levelStr[d] == null ? "-" : levelStr[d]);
                 sb.Append(",\"enable\":").Append(enable[d] ? "true" : "false");
@@ -1418,6 +1428,12 @@ namespace SongRequestMod
                 sb.Append('}');
             }
             sb.Append("]}");
+        }
+
+        /// <summary>137 -> "13.7"(定数, JSON 数字; 不受系统区域设置的小数点影响)</summary>
+        private static string Const(int c10)
+        {
+            return (c10 / 10) + "." + (c10 % 10);
         }
 
         /// <summary>"13+" -> 13 (给网页排序用)</summary>
