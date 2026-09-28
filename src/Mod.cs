@@ -4,10 +4,10 @@ using MelonLoader;
 using HarmonyLib;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(SongRequestMod.Mod), "SongRequest", "1.1.8", "")]
+[assembly: MelonInfo(typeof(SongRequestMod.Mod), "SongRequest", "1.1.9", "")]
 [assembly: MelonGame("sega-interactive", "Sinmai")]
-[assembly: AssemblyVersion("1.1.8.0")]
-[assembly: AssemblyFileVersion("1.1.8.0")]
+[assembly: AssemblyVersion("1.1.9.0")]
+[assembly: AssemblyFileVersion("1.1.9.0")]
 
 namespace SongRequestMod
 {
@@ -237,6 +237,10 @@ namespace SongRequestMod
         public static bool JacketService = true;
         /// <summary>游戏启动后自动开启远程分享(关掉就只能在网页上点「分享链接」手动开)</summary>
         public static bool RemoteAutoStart = true;
+        /// <summary>远程分享时, 本机有公网 IPv6 就额外给一条直连链接</summary>
+        public static bool IPv6Direct = true;
+        /// <summary>远程分享时, 试着用 STUN 打洞给一条 IPv4 直连链接(NAT1 网络才能用)</summary>
+        public static bool NatPunch = true;
 
         private static string PathFile
         {
@@ -321,6 +325,14 @@ namespace SongRequestMod
                     {
                         if (bool.TryParse(val, out b)) RemoteAutoStart = b;
                     }
+                    else if (key == "IPv6直连" || key.Equals("IPv6Direct", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (bool.TryParse(val, out b)) IPv6Direct = b;
+                    }
+                    else if (key == "NAT打洞" || key.Equals("NatPunch", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (bool.TryParse(val, out b)) NatPunch = b;
+                    }
                 }
             }
             catch (Exception e)
@@ -335,7 +347,7 @@ namespace SongRequestMod
         {
             try
             {
-                string[] need = { "启用", "网页", "网页端口", "局域网访问", "跳转后进难度画面", "封面服务", "远程分享自动开启", "崩溃保护", "详细日志" };
+                string[] need = { "启用", "网页", "网页端口", "局域网访问", "跳转后进难度画面", "封面服务", "远程分享自动开启", "IPv6直连", "NAT打洞", "崩溃保护", "详细日志" };
                 if (!System.IO.File.Exists(PathFile)) { Save(); return; }
                 string txt = System.IO.File.ReadAllText(PathFile);
                 for (int i = 0; i < need.Length; i++)
@@ -386,10 +398,17 @@ namespace SongRequestMod
                     + "封面服务=" + B(JacketService) + "\r\n"
                     + "\r\n"
                     + "## ===== 远程分享 =====\r\n"
-                    + "## 在网页上点「分享链接」会生成一个公网链接(Cloudflare 免费隧道), 贴给别人就能远程点歌\r\n"
-                    + "## 首次使用会自动下载 cloudflared.exe 到 Mods\\SongRequestMod\\; 每次开启都换新链接, 关掉后旧链接立即失效\r\n"
+                    + "## 在网页上点「分享链接」会生成公网链接, 贴给别人就能远程点歌(免注册)。几条线路同时起, 能用的都会列出来:\r\n"
+                    + "##   Cloudflare 免费隧道: 大多数网络都能开, 国内不稳; 首次使用会自动下载 cloudflared.exe 到 Mods\\SongRequestMod\\\r\n"
+                    + "##   IPv6 直连 / IPv4 直连(NAT 打洞): 不经过第三方服务器, 国内可用, 但要看双方网络条件\r\n"
+                    + "## 每次开启都换新链接, 关掉后旧链接立即失效\r\n"
                     + "## true(默认): 游戏一启动就自动开启分享, 链接打印在日志里、也显示在本机网页上; false: 只在网页上手动开\r\n"
                     + "远程分享自动开启=" + B(RemoteAutoStart) + "\r\n"
+                    + "## IPv6 直连: 本机有公网 IPv6 时给一条 http://[IPv6]:端口 的链接。要对方也有 IPv6, 光猫/路由器要允许 IPv6 入站\r\n"
+                    + "IPv6直连=" + B(IPv6Direct) + "\r\n"
+                    + "## NAT 打洞: 用 STUN 查出公网 IPv4 和端口, 给一条 http://IP:端口 的链接(端口可能中途变, 面板会自动更新)。\r\n"
+                    + "## 网络要是 NAT1(全锥形)才打得开; 家里有路由器时会用 UPnP 自动设端口转发\r\n"
+                    + "NAT打洞=" + B(NatPunch) + "\r\n"
                     + "\r\n"
                     + "## ===== 崩溃保护 =====\r\n"
                     + "## true: 给游戏自身的 RestoreGhost/CategoryTab* 打补丁兜住闪退(例如登录时段位 BOSS 曲目缺失);\r\n"

@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using MelonLoader;
@@ -13,10 +15,11 @@ namespace SongRequestMod
     using Proc = System.Diagnostics.Process;
 
     /// <summary>
-    /// 远程分享: 用 Cloudflare 免费临时隧道(cloudflared "quick tunnel")把本机点歌台映射成一个公网 https 链接,
-    /// 贴给别人就能远程点歌。不需要注册账号、不需要改路由器 / 防火墙。
-    ///   - cloudflared.exe 放在 Mods\SongRequestMod\ 下; 没有就自动下载(官方 GitHub Release)
-    ///   - 每次开启都会换一个新链接 + 新密钥, 关掉后旧链接立刻失效
+    /// 远程分享: 把本机点歌台变成公网链接, 贴给别人就能远程点歌。不需要注册账号。开启时几条线路同时起, 能用的都列出来:
+    ///   - Cloudflare 免费临时隧道(cloudflared "quick tunnel"): https 链接, 大多数网络都能开, 但国内不稳
+    ///     cloudflared.exe 放在 Mods\SongRequestMod\ 下; 没有就自动下载(官方 GitHub Release)
+    ///   - IPv6 直连 / NAT 打洞(见 Direct): 不经过第三方, 国内网络可用, 但要看双方网络条件
+    ///   - 每次开启都会换新链接 + 新密钥, 关掉后旧链接立刻失效
     ///   - 远程访问必须带密钥(?k=), 首次打开后写进 cookie, 之后页面内请求自动带上
     /// </summary>
     internal static class Tunnel
@@ -30,28 +33,74 @@ namespace SongRequestMod
         private static string _msg = "";
         private static string _baseUrl;           // https://xxx.trycloudflare.com
         private static string _key;               // 本次分享的访问密钥
+        /// <summary>分享开着(用户开启、还没关闭)。Cloudflare 失败时直连线路照样能用, 所以密钥跟着它, 不跟 _state</summary>
+        private static bool _on;
 
         internal static string State { get { lock (_lock) { CheckExited(); return _state; } } }
-        internal static string Key { get { lock (_lock) { return _state == "running" ? _key : null; } } }
+        internal static string Key { get { lock (_lock) { return _on ? _key : null; } } }
 
-        /// <summary>给网页的状态 JSON(只给本机/局域网看, 里面有带密钥的链接)</summary>
+        /// <summary>
+        /// 给网页的状态 JSON(只给本机/局域网看, 里面有带密钥的链接)。
+        /// state 是 Cloudflare 那条线路的状态; links = 所有能用的链接; notes = 用不了的线路和原因
+        /// </summary>
         internal static string Json()
         {
+            // 先在锁外取直连线路的链接(Direct 里取密钥时会反过来拿这把锁)
+            List<string[]> direct = Direct.Links();
+            List<string> notes = Direct.Notes();
+            bool pending = Direct.Pending;
             lock (_lock)
             {
                 CheckExited();
-                string share = _state == "running" && _baseUrl != null ? _baseUrl + "/?k=" + _key : "";
-                return "{\"ok\":true,\"state\":\"" + _state + "\",\"url\":\"" + SongTable.Escape(share)
-                    + "\",\"msg\":\"" + SongTable.Escape(_msg) + "\"}";
+                StringBuilder links = new StringBuilder();
+                string first = "";
+                if (_on && _key != null)
+                {
+                    List<string[]> all = new List<string[]>();
+                    if (_state == "running" && _baseUrl != null)
+                    {
+                        all.Add(new string[] { "Cloudflare 通道", _baseUrl, "大多數網路都能開；中國可能不穩" });
+                    }
+                    all.AddRange(direct);
+                    foreach (string[] l in all)
+                    {
+                        string url = l[1] + "/?k=" + _key;
+                        if (first.Length == 0) first = url;
+                        if (links.Length > 0) links.Append(',');
+                        links.Append("{\"name\":\"").Append(SongTable.Escape(l[0])).Append("\",\"url\":\"")
+                            .Append(SongTable.Escape(url)).Append("\",\"note\":\"").Append(SongTable.Escape(l[2])).Append("\"}");
+                    }
+                }
+                StringBuilder ns = new StringBuilder();
+                if (_on)
+                {
+                    foreach (string n in notes)
+                    {
+                        if (ns.Length > 0) ns.Append(',');
+                        ns.Append('"').Append(SongTable.Escape(n)).Append('"');
+                    }
+                }
+                return "{\"ok\":true,\"on\":" + (_on ? "true" : "false")
+                    + ",\"state\":\"" + (_on ? _state : "off") + "\",\"url\":\"" + SongTable.Escape(first)
+                    + "\",\"msg\":\"" + SongTable.Escape(_msg) + "\",\"pending\":" + (_on && pending ? "true" : "false")
+                    + ",\"links\":[" + links + "],\"notes\":[" + ns + "]}";
             }
         }
 
         /// <summary>开启分享(后台线程做下载/启动, 立即返回)</summary>
         internal static void Start()
         {
+            bool fresh;
             lock (_lock)
             {
                 CheckExited();
+                // 已经开着、只是 Cloudflare 失败了: 只重试 Cloudflare, 密钥和直连链接保持不变(已经发出去的链接继续有效)
+                fresh = !_on;
+                if (fresh)
+                {
+                    _on = true;
+                    _key = NewKey();
+                }
                 if (_state == "downloading" || _state == "starting" || _state == "running")
                 {
                     return;
@@ -59,8 +108,11 @@ namespace SongRequestMod
                 _state = "starting";
                 _msg = "正在啟動通道…";
                 _baseUrl = null;
-                _key = NewKey();
                 _lastLine = "";
+            }
+            if (fresh)
+            {
+                Direct.Start();
             }
             Thread th = new Thread(Run);
             th.IsBackground = true;
@@ -78,9 +130,11 @@ namespace SongRequestMod
                 _msg = "";
                 _baseUrl = null;
                 _key = null;
+                _on = false;
             }
             Kill(p);
             DeletePidFile();
+            Direct.Stop();
         }
 
         private static void Run()
@@ -248,9 +302,8 @@ namespace SongRequestMod
                 if (_proc.HasExited)
                 {
                     _state = "error";
-                    _msg = "通道已斷開(cloudflared 退出), 請重新開啟分享";
+                    _msg = "通道已斷開(cloudflared 退出), 請按「重試」";
                     _baseUrl = null;
-                    _key = null;
                     _proc = null;
                 }
             }

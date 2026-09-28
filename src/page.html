@@ -1074,12 +1074,17 @@ input.lv.bad{box-shadow:inset 0 0 0 1px var(--c-danger)}
 .share-panel[hidden]{display:none}
 .share-panel h3{margin:0 0 var(--sp-2);font-size:var(--fs-lg);font-weight:var(--fw-bold)}
 .share-panel .share-msg{color:var(--c-text-secondary);margin:0 0 var(--sp-3);word-break:break-all}
+.share-panel .share-link{margin:0 0 var(--sp-3)}
+.share-panel .share-link-name{font-size:var(--fs-sm);font-weight:var(--fw-bold);margin:0 0 2px}
+.share-panel .share-link-note{font-size:var(--fs-sm);color:var(--c-text-tertiary);margin:0 0 var(--sp-1)}
+.share-panel .share-link-row{display:flex;gap:var(--sp-2)}
 .share-panel .share-url{
-  width:100%;box-sizing:border-box;margin:0 0 var(--sp-3);
+  flex:1 1 auto;min-width:0;box-sizing:border-box;
   padding:var(--sp-2) var(--sp-3);border:1px solid var(--c-line-strong);border-radius:var(--r-base);
   background:var(--c-surface);color:var(--c-text);font-family:var(--font-mono);font-size:var(--fs-sm);
 }
-.share-panel .share-url[hidden]{display:none}
+.share-panel .share-notes{margin:0 0 var(--sp-3);padding:0 0 0 1.1em;color:var(--c-text-tertiary);font-size:var(--fs-sm)}
+.share-panel .share-notes:empty{display:none}
 .share-panel .share-row{display:flex;gap:var(--sp-2);flex-wrap:wrap}
 .share-panel .share-row .btn[hidden]{display:none}
 .share-panel .share-note{margin:var(--sp-3) 0 0;color:var(--c-text-tertiary);font-size:var(--fs-sm)}
@@ -1951,14 +1956,14 @@ input.lv.bad{box-shadow:inset 0 0 0 1px var(--c-danger)}
 <div class="share-panel" id="sharePanel" hidden role="dialog" aria-label="遠端分享">
   <h3>遠端分享</h3>
   <p class="share-msg" id="shareMsg">未開啟</p>
-  <input class="share-url" id="shareUrl" type="text" readonly hidden>
+  <div id="shareLinks"></div>
+  <ul class="share-notes" id="shareNotes"></ul>
   <div class="share-row">
     <button class="btn btn-sm" id="shareStart" type="button">開啟分享</button>
-    <button class="btn btn-sm" id="shareCopy" type="button" hidden>複製連結</button>
     <button class="btn btn-sm" id="shareStop" type="button" hidden>關閉分享</button>
     <button class="btn btn-sm" id="shareClose" type="button">收起</button>
   </div>
-  <p class="share-note">拿到連結的人都能點歌。每次開啟都會換新連結，關閉後舊連結立即失效；退出遊戲也會自動關閉。</p>
+  <p class="share-note">拿到連結的人都能點歌。有好幾條時發任一條就行，打不開就換一條。每次開啟都會換新連結，關閉後舊連結立即失效；退出遊戲也會自動關閉。</p>
 </div>
 
 <div id="toasts" aria-live="polite"></div>
@@ -3179,28 +3184,51 @@ function paintBadge(n, st, v){
   elStStateSub.textContent = String(st).toUpperCase();
 }
 /* 遠端分享: 開關 cloudflared 隧道, 拿到帶金鑰的公網連結 */
-var SHARE_TEXT = {
-  off:'未開啟。點「開啟分享」產生一個公開連結。',
-  downloading:'首次使用，正在下載 cloudflared（約 50MB）…',
-  starting:'正在建立通道，通常 5–30 秒…',
-  running:'已開啟。把下面的連結發給對方即可遠端點歌：',
-  error:'開啟失敗'
-};
 var shareTimer = null;
+/* Cloudflare 那條線路的狀態文字(直連線路另外列在 notes 裡) */
+function shareCfText(j){
+  var st = j.state;
+  if (st === 'downloading' || st === 'starting') return 'Cloudflare：' + (j.msg || '正在建立通道，通常 5–30 秒…');
+  if (st === 'error') return 'Cloudflare：' + (j.msg || '開啟失敗');
+  return '';
+}
 function paintShare(j){
-  var st = (j && j.state) || 'off';
-  var msg = SHARE_TEXT[st] || st;
-  if (j && j.msg && st !== 'running') msg = (st === 'error' ? '開啟失敗：' : '') + j.msg;
+  j = j || {};
+  var on = !!j.on;
+  var st = j.state || 'off';
+  var links = j.links || [];
+  var cfBusy = st === 'downloading' || st === 'starting';
+  var busy = on && (cfBusy || !!j.pending);
+  var msg;
+  if (!on) msg = '未開啟。點「開啟分享」產生公開連結。';
+  else if (links.length) msg = '已開啟。把下面任一條連結發給對方即可遠端點歌：';
+  else if (busy) msg = '正在建立連結…';
+  else msg = '開啟失敗：目前沒有可用的連結。';
   $('shareMsg').textContent = msg;
-  var url = (j && j.url) || '';
-  var elUrl = $('shareUrl');
-  elUrl.hidden = !url;
-  if (elUrl.value !== url) elUrl.value = url;
-  var busy = st === 'downloading' || st === 'starting';
-  $('shareStart').hidden = st === 'running' || busy;
-  $('shareStart').textContent = st === 'error' ? '重試' : '開啟分享';
-  $('shareCopy').hidden = !url;
-  $('shareStop').hidden = st === 'off' || st === 'error';
+
+  var elLinks = $('shareLinks');
+  var sig = JSON.stringify(links);
+  /* 連結沒變就不重建, 免得使用者正在選取的文字被刷掉 */
+  if (elLinks.getAttribute('data-sig') !== sig){
+    elLinks.setAttribute('data-sig', sig);
+    elLinks.innerHTML = links.map(function(l, i){
+      return '<div class="share-link"><div class="share-link-name">' + escHtml(l.name) + '</div>' +
+        (l.note ? '<div class="share-link-note">' + escHtml(l.note) + '</div>' : '') +
+        '<div class="share-link-row"><input class="share-url" type="text" readonly value="' + escHtml(l.url) + '">' +
+        '<button class="btn btn-sm" type="button" data-copy="' + i + '">複製</button></div></div>';
+    }).join('');
+  }
+  var notes = [];
+  if (on){
+    var cf = shareCfText(j);
+    if (cf) notes.push(cf);
+    (j.notes || []).forEach(function(n){ notes.push(n); });
+  }
+  $('shareNotes').innerHTML = notes.map(function(n){ return '<li>' + escHtml(n) + '</li>'; }).join('');
+
+  $('shareStart').hidden = on && st !== 'error';
+  $('shareStart').textContent = on ? '重試 Cloudflare' : '開啟分享';
+  $('shareStop').hidden = !on;
   $('shareBtn').classList.toggle('is-busy', busy);
   clearTimeout(shareTimer);
   if (busy || !$('sharePanel').hidden) shareTimer = setTimeout(pollShare, busy ? 1000 : 5000);
@@ -3228,8 +3256,10 @@ function bindShare(){
       toast('ok', '已關閉分享', '舊連結已失效');
     }).catch(function(e){ toast('bad', '關閉分享失敗', e.message); });
   });
-  $('shareCopy').addEventListener('click', function(){
-    var elUrl = $('shareUrl'), url = elUrl.value;
+  $('shareLinks').addEventListener('click', function(e){
+    var btn = e.target.closest('[data-copy]');
+    if (!btn) return;
+    var elUrl = btn.parentNode.querySelector('.share-url'), url = elUrl.value;
     function done(){ toast('ok', '已複製分享連結', url); }
     /* 非 https 的區域網頁面沒有 navigator.clipboard, 退回 execCommand */
     if (navigator.clipboard && window.isSecureContext){
@@ -3254,7 +3284,7 @@ function pollStatus(){
       /* 本機第一次連上: 分享已自動開啟的話直接把連結面板彈出來 */
       $('shareBtn').hidden = false;
       api('/api/remote').then(function(r){
-        if (r && (r.state === 'running' || r.state === 'starting' || r.state === 'downloading')){
+        if (r && r.on){
           $('sharePanel').hidden = false;
         }
         paintShare(r);

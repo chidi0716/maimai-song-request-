@@ -2,7 +2,7 @@
 
 默认端口 `8790`，只监听本机 +（配置开启时的）局域网 IP；本机 / 局域网**无鉴权**。
 
-**远程分享**（经 cloudflared 隧道进来、带 `Cf-Ray` / `Cf-Connecting-Ip` / `X-Forwarded-For` 头的请求）必须带本次分享的密钥：
+**远程分享**（经 cloudflared 隧道进来、带 `Cf-Ray` / `Cf-Connecting-Ip` / `X-Forwarded-For` 头的请求，以及经 IPv6 直连 / NAT 打洞转发器进来、带 `X-SongRequest-Remote` 头的请求）必须带本次分享的密钥：
 首次用 `?k=<密钥>` 打开，服务端写 `srk` cookie，之后同一浏览器的请求自动带上；密钥不对回 403。
 远程访问者不能用 `/api/selfcheck`、`/api/selftest`、`/api/perf`、`/api/remote*`。
 
@@ -20,8 +20,8 @@
 | POST | `/api/random` | 表单 `diff=`（可选） |
 | GET | `/jacket?id=&s=1` | 曲绘 PNG（`s=1` 小图） |
 | GET | `/api/npstream` | **SSE**：`data: {nowplaying json}`，仅在内容变化时推送 |
-| GET | `/api/remote` | 远程分享状态 `{"state":"off\|downloading\|starting\|running\|error","url":"带密钥的分享链接","msg":""}`（仅本机/局域网） |
-| POST | `/api/remote/start` | 开启远程分享（后台启动，轮询 `/api/remote` 看进度；仅本机/局域网） |
+| GET | `/api/remote` | 远程分享状态（仅本机/局域网）：`on` 分享是否开着；`state`/`msg` 为 Cloudflare 线路状态（`off\|downloading\|starting\|running\|error`）；`links` = 所有可用链接 `[{"name","url"(带密钥),"note"}]`；`notes` = 用不了的线路及原因；`pending` = 直连线路还在检查；`url` = 第一条链接 |
+| POST | `/api/remote/start` | 开启远程分享（后台启动，轮询 `/api/remote` 看进度；已开着但 Cloudflare 失败时只重试 Cloudflare，密钥与直连链接不变；仅本机/局域网） |
 | POST | `/api/remote/stop` | 关闭远程分享，旧链接立即失效（仅本机/局域网） |
 
 `/api/status` 额外返回 `viewer`：`local`（本机/局域网）或 `remote`（经分享链接）。

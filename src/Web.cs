@@ -164,15 +164,17 @@ namespace SongRequestMod
             string path = ctx.Request.Url.AbsolutePath;
             string method = ctx.Request.HttpMethod;
 
-            // 远程(经隧道进来的)请求: 必须带本次分享的密钥, 且不能碰诊断/隧道开关接口
+            // 远程(经隧道 / 直连线路进来的)请求: 必须带本次分享的密钥, 且不能碰诊断/隧道开关接口
             bool remote = IsRemote(ctx.Request);
             if (remote)
             {
                 string qk = Query(ctx.Request.Url.Query, "k");
                 if (Tunnel.KeyMatches(qk))
                 {
+                    // Cloudflare 那边是 https; 直连线路是 http, 带 Secure 的 cookie 浏览器不会存
+                    bool plain = !string.IsNullOrEmpty(ctx.Request.Headers[Direct.RemoteHeader]);
                     ctx.Response.AppendHeader("Set-Cookie",
-                        "srk=" + qk + "; Path=/; Max-Age=86400; HttpOnly; Secure; SameSite=Lax");
+                        "srk=" + qk + "; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax" + (plain ? "" : "; Secure"));
                 }
                 else if (!Tunnel.KeyMatches(Cookie(ctx.Request, "srk")))
                 {
@@ -453,12 +455,14 @@ namespace SongRequestMod
         }
 
         /// <summary>
-        /// 经 cloudflared 隧道进来的请求: TCP 上看是 127.0.0.1, 但 Cloudflare 一定会带上这些头。
+        /// 经隧道 / 直连线路进来的请求: TCP 上看是 127.0.0.1, 但 Cloudflare 一定会带上 Cf-* 头,
+        /// 直连线路的转发器一定会带上 X-SongRequest-Remote(并删掉客户端自己发的同名头)。
         /// (本机/局域网的人自己伪造这些头只会把自己降级成"遠端", 不会多拿权限)
         /// </summary>
         private static bool IsRemote(HttpListenerRequest r)
         {
-            return !string.IsNullOrEmpty(r.Headers["Cf-Ray"])
+            return !string.IsNullOrEmpty(r.Headers[Direct.RemoteHeader])
+                || !string.IsNullOrEmpty(r.Headers["Cf-Ray"])
                 || !string.IsNullOrEmpty(r.Headers["Cf-Connecting-Ip"])
                 || !string.IsNullOrEmpty(r.Headers["X-Forwarded-For"]);
         }
