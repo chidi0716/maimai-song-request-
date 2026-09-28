@@ -2054,7 +2054,7 @@ var state = {
   loadErrShown: false, lastRefreshAt: 0,
   rendered: 0,
   aliasEntries: null, aliasSongs: null,
-  jacketTick: 0, npJacketId: '', npJacketKey: '', npSig: '', npState: '',
+  jacketTick: 0, jacketGen: 0, npJacketId: '', npJacketKey: '', npSig: '', npState: '',
   /* 已渲染的 "曲目+狀態+難度" 指紋: 相同 -> 走原地更新路徑, 封面節點絕不被重建 */
   npKey: ''
 };
@@ -2303,13 +2303,14 @@ function buildRows(songs){
     var alias    = aliasList(s.alias);
     var aliasCmp = [];
     for (k=0;k<alias.length;k++) aliasCmp.push({ t: alias[k], n: normMatch(alias[k]) });
-    state.jacketTick++;
     out.push({
       raw: s, id: s.id, name: name, artist: artist, genre: genre,
       bpm: (typeof s.bpm === 'number' && isFinite(s.bpm)) ? s.bpm : null,
       maxLevel: songMax(s),
       maxConst10: 0,
-      jkey: String(state.jacketTick) + '-' + s.id,
+      /* 封面快取 key 只跟 mod 的「曲繪代」有關(曲目數變了才 +1)。以前每行一個自增號,
+         列表每次重排 key 全變, 瀏覽器把可見封面全部重拉, mod 又得在主執行緒一張張重新編碼。URL 裡本來就有 id */
+      jkey: 'g' + state.jacketGen,
       hay: norm(name + ' ' + artist + ' ' + s.id),
       alias: alias, aliasCmp: aliasCmp,
       aliasHay: aliasCmp.length ? ' ' + aliasCmp.map(function(a){ return a.n; }).join(' ') + ' ' : '',
@@ -2623,10 +2624,21 @@ function requestPlay(id, diff){
   var d = (diff === 0 || diff) ? diff : defaultDiff(row.raw);
   var payload = { id: row.id };
   if (d >= 0) payload.diff = d;
+  /* 譜面類型一定要一起傳: 遊戲裡 DX 譜和標準譜是「同一張卡」, 靠 ScoreType 切換,
+     不傳的話 mod 只能猜, 同時有 DX+標準 的歌會停在標準譜(= 點不了 DX)。
+     只有一種就傳那一種; 兩種都有 -> 跟隨「全部 / DX / 標準」篩選; 沒篩選時 DX 行(id ≥ 10000)傳 DX,
+     標準行在 DX 有自己一行時傳標準, 否則預設 DX */
+  var rDX = hasDX(row.raw) === 1, rSTD = hasSTD(row.raw) === 1;
+  if (rDX && !rSTD) payload.type = 'dx';
+  else if (rSTD && !rDX) payload.type = 'std';
+  else if (state.typeFilter === 'dx' || state.typeFilter === 'std') payload.type = state.typeFilter;
+  else if (row.id >= 10000) payload.type = 'dx';
+  else payload.type = findRow(row.id + 10000) ? 'std' : 'dx';
+  var tLabel = payload.type === 'std' ? 'STD' : 'DX';
   pending = true;
   /* 第一幀就反饋: 難度塊脈衝 + 立即提示"跳轉中", 不等 HTTP 往返 */
   markSending(row.id, d, true);
-  toast('info', '跳轉中…', '#' + row.id + ' ' + row.name + (d >= 0 ? ' [' + DIFF_NAME[d] + ']' : ' [自動]'));
+  toast('info', '跳轉中…', '#' + row.id + ' ' + row.name + (d >= 0 ? ' [' + tLabel + ' ' + DIFF_NAME[d] + ']' : ' [' + tLabel + ' 自動]'));
   postForm(API.play, payload).then(function(j){
     pending = false;
     markSending(row.id, d, false);
@@ -2635,7 +2647,7 @@ function requestPlay(id, diff){
       return;   /* 連點時前面的請求被後面的取代, 不算失敗 */
     }
     if (j && j.ok){
-      toast('ok', '已點歌', '#' + row.id + ' ' + row.name + (d >= 0 ? ' [' + DIFF_NAME[d] + ']' : ' [自動]'));
+      toast('ok', '已點歌', msg);
     } else {
       toast('bad', '點歌未生效', msg);
       showErr('點歌未生效：' + msg);
@@ -3037,9 +3049,9 @@ function renderNow(j){
   var jk;
   if (id !== null){
     var npId = 'np-' + id;
-    if (state.npJacketId !== npId){
-      state.jacketTick++;
-      state.npJacketKey = npId + '-k' + state.jacketTick;
+    var wantKey = npId + '-g' + state.jacketGen;
+    if (state.npJacketKey !== wantKey){
+      state.npJacketKey = wantKey;
       state.npJacketId = npId;
     }
     jk = npJacketHTML(id, name, state.npJacketKey);
@@ -3251,6 +3263,12 @@ function pollStatus(){
     state.aliasEntries = (j && typeof j.aliases === 'number' && isFinite(j.aliases)) ? j.aliases : null;
     state.aliasSongs   = (j && typeof j.aliasSongs === 'number' && isFinite(j.aliasSongs)) ? j.aliasSongs : null;
     var rev = (j && (typeof j.rev === 'number' || typeof j.rev === 'string')) ? j.rev : null;
+    /* 曲繪代變了 = mod 的封面快取被清過(曲目數變了) -> 封面 key 跟著換, 這時才值得重拉 */
+    var jgen = (j && typeof j.jacketGen === 'number') ? j.jacketGen : null;
+    if (jgen !== null && jgen !== state.jacketGen){
+      state.jacketGen = jgen;
+      if (state.rows.length){ refreshSongs({}); }
+    }
     var changed = false;
     if (rev !== null && state.rev !== null && String(rev) !== String(state.rev)) changed = true;
     if (typeof j.songs === 'number' && state.songsLoaded && j.songs !== state.count) changed = true;

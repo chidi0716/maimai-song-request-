@@ -61,16 +61,83 @@ namespace SongRequestMod
             {
                 return;
             }
-            int n = RawCount();
+            // 正在点歌跳转(排队中 / 等切画面): 这一帧别再叠整表重探 + 重出, 两件重活撞一起就是"卡一下"
+            if (SelectDriver.Busy)
+            {
+                return;
+            }
             // 曲目数变了(热导入) 或 刚进选曲界面(这时才拿得到 STD/DX 真值) -> 重出
             bool inSelect = SelectDriver.InSelect;
             bool enteredSelect = inSelect && !_wasInSelect;
             _wasInSelect = inSelect;
             // 别名文件被改过(改了 aliases.txt)也要重出, 不然别名要等曲库变化才生效
             bool aliasChanged = Aliases.StampChanged();
-            if (_json == null || n != _builtSnapCount || enteredSelect || aliasChanged)
+
+            // "曲目表有没有变"以前是每 5 秒 RawCount() -> Snapshot(false), 快照 TTL 只有 800ms,
+            // 等于每个 tick 都整表重探(选曲列表 + GetMusics + 反射 DataManager 候选字段 + 去重排序),
+            // 选曲界面里每 5 秒一次几十毫秒的主线程停顿。现在改成便宜信号:
+            //   在选曲界面 -> 只数各分类条数(微秒级)
+            //   不在选曲界面 -> 60 秒才整表重探一次
+            bool tableChanged = false;
+            int cheap = CheapSelectCount();
+            if (cheap >= 0)
             {
+                if (_cheapCount >= 0 && cheap != _cheapCount)
+                {
+                    tableChanged = true;
+                }
+                _cheapCount = cheap;
+            }
+            else
+            {
+                _cheapCount = -1;
+                if (_json != null && unchecked(Environment.TickCount - _lastIdleProbeMs) >= IdleProbeMs)
+                {
+                    _lastIdleProbeMs = Environment.TickCount;
+                    if (RawCount() != _builtSnapCount)
+                    {
+                        tableChanged = true;
+                    }
+                }
+            }
+            if (_json == null || enteredSelect || aliasChanged || tableChanged)
+            {
+                if (aliasChanged)
+                {
+                    ClearFrags();   // 别名变了 -> 静态片段里的别名也得重做
+                }
                 Json(true);
+            }
+        }
+
+        private static int _cheapCount = -1;
+        private static int _lastIdleProbeMs;
+        private const int IdleProbeMs = 60000;
+
+        /// <summary>便宜的"曲目表有没有变"信号: 选曲列表各分类条目数之和 + 分类数。不在选曲界面返回 -1</summary>
+        private static int CheapSelectCount()
+        {
+            try
+            {
+                var list = SelectDriver.SelectList;
+                if (list == null || list.Count == 0)
+                {
+                    return -1;
+                }
+                int n = list.Count;
+                for (int c = 0; c < list.Count; c++)
+                {
+                    var page = list[c];
+                    if (page != null)
+                    {
+                        n += page.Count;
+                    }
+                }
+                return n;
+            }
+            catch
+            {
+                return -1;
             }
         }
 
@@ -170,12 +237,12 @@ namespace SongRequestMod
                 new List<KeyValuePair<int, Manager.MaiStudio.MusicData>>();
         }
 
-        /// <summary>真正的错误走 MelonLogger.Warning, 但日志本身不能把探测流程带崩</summary>
+        /// <summary>诊断警告只打第一次(ModLog.WarnOnce), 但日志本身不能把探测流程带崩</summary>
         private static void Warn(string msg)
         {
             try
             {
-                MelonLogger.Warning(msg);
+                ModLog.WarnOnce(msg);
             }
             catch
             {
@@ -190,7 +257,9 @@ namespace SongRequestMod
                 int now = Environment.TickCount;
                 if (fresh || _snap == null || unchecked(now - _snapMs) >= SnapTtlMs)
                 {
+                    System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
                     ProbeAll();
+                    Perf.Hit("probe", sw.Elapsed.TotalMilliseconds);   // 整表重探: 主线程停顿点
                     _snapMs = now;
                 }
                 return _snap;
@@ -225,7 +294,7 @@ namespace SongRequestMod
             }
             catch (Exception e)
             {
-                Warn("[SongRequest] 取 DataManager 实例失败: " + e.Message);
+                Warn("取 DataManager 实例失败: " + e.Message);
             }
             if (dm == null)
             {
@@ -298,7 +367,7 @@ namespace SongRequestMod
                     && !probes[0].Skipped && !_fallbackWarned)
                 {
                     _fallbackWarned = true;
-                    Warn("[SongRequest] 主数据源 " + probes[0].Name + " 读到 0 条"
+                    Warn("主数据源 " + probes[0].Name + " 读到 0 条"
                         + (probes[0].Error.Length > 0 ? " (" + probes[0].Error + ")" : "")
                         + ", 已自动改用 " + best.Name + "(" + best.Count + " 条)。明细: /api/selfcheck");
                 }
@@ -306,13 +375,13 @@ namespace SongRequestMod
             else if (!_zeroWarned)
             {
                 _zeroWarned = true;
-                Warn("[SongRequest] 所有曲目数据源都读到 0 条 —— 点歌台会显示 0 首。"
+                Warn("所有曲目数据源都读到 0 条 —— 点歌台会显示 0 首。"
                     + "各数据源明细见 /api/selfcheck 的 songTable.tried");
             }
             if (_lastLoggedSource != _snapSource)
             {
                 _lastLoggedSource = _snapSource;
-                ModLog.Info("[SongRequest] 曲目表来源: " + _snapSource + " / " + _snapRaw + " 条");
+                ModLog.Info("曲目表来源: " + _snapSource + " / " + _snapRaw + " 条");
             }
         }
 
@@ -735,7 +804,7 @@ namespace SongRequestMod
             }
             catch (Exception e)
             {
-                MelonLogger.Warning("[SongRequest] 枚举 DataManager 字段失败: " + e.Message);
+                ModLog.WarnOnce("枚举 DataManager 字段失败: " + e.Message);
             }
             return hits;
         }
@@ -926,11 +995,11 @@ namespace SongRequestMod
             if (_byId.Count > 0)
             {
                 _retryFails = 0;
-                ModLog.Info("[SongRequest] 曲目表重建成功: " + _byId.Count + " 首 (来源 " + _snapSource + ")");
+                ModLog.Info("曲目表重建成功: " + _byId.Count + " 首 (来源 " + _snapSource + ")");
                 return;
             }
             _retryFails++;
-            Warn("[SongRequest] 曲目表重建后仍是 0 首(第 " + _retryFails + "/"
+            Warn("曲目表重建后仍是 0 首(第 " + _retryFails + "/"
                 + RetryMaxFails + " 次, 数据源: " + _snapSource + ")"
                 + (_retryFails >= RetryMaxFails ? " —— 停止自动重试, 明细见 /api/selfcheck" : ""));
         }
@@ -1139,6 +1208,7 @@ namespace SongRequestMod
                 return CachedJson;
             }
             string built = Build();
+            Perf.Hit("build", _lastBuildMs);   // 导出整表 JSON: 另一个主线程停顿点
             if (built != _json)
             {
                 // 内容真的变了才换版本号: 以前每次重建都 +1, 两个以上网页互相看到 rev 变化就互相触发刷新,
@@ -1156,11 +1226,15 @@ namespace SongRequestMod
             {
                 _snap = null;
             }
+            ClearFrags();   // 手动刷新 = 连每首歌的缓存片段一起重做(曲目数没变但资料改过时也能刷到)
             return Json(true);
         }
 
+        private static double _lastBuildMs;
+
         private static string Build()
         {
+            System.Diagnostics.Stopwatch swBuild = System.Diagnostics.Stopwatch.StartNew();
             StringBuilder sb = new StringBuilder(1 << 21);
             sb.Append('[');
             int n = 0;
@@ -1194,7 +1268,7 @@ namespace SongRequestMod
                     if (!_disableFilterWarned)
                     {
                         _disableFilterWarned = true;
-                        Warn("[SongRequest] 检测到整库被 disable 过滤清空(" + raw
+                        Warn("检测到整库被 disable 过滤清空(" + raw
                             + " 首全部被判为禁用), 已自动关闭 disable 过滤 —— 这几首会照常显示");
                     }
                     sb = new StringBuilder(1 << 21);
@@ -1204,20 +1278,24 @@ namespace SongRequestMod
             }
             catch (Exception e)
             {
-                MelonLogger.Error("[SongRequest] 导出曲目表失败: " + e.Message);
+                MelonLogger.Error("导出曲目表失败: " + e.Message);
             }
             sb.Append(']');
             _jsonCount = n;
             // 记下这次用的原始条目数: Tick 靠它判断曲目表有没有变(不能跟 _jsonCount 比, 那个已滤掉禁用曲目)
             _builtSnapCount = _snapRaw;
-            // 曲目数变了(热导入) -> 曲绘缓存也作废; 只是重进选曲界面就别清, 不然网页要把所有封面重编码一遍
-            if (n != prevCount)
+            // 曲目数变了(热导入) -> 曲绘缓存 + 每首歌的 JSON 片段都作废; 只是重进选曲界面就别清,
+            // 不然网页要把所有封面重编码一遍。第一次导出也别清(会把刚建好的片段全扔掉)
+            if (prevCount >= 0 && n != prevCount)
             {
                 Jackets.ClearCache();
+                ClearFrags();
             }
             _types = null;
-            ModLog.Info("[SongRequest] 曲目表已导出: " + n + " 首"
-                + (_disableFilterOff ? " (disable 过滤已关闭)" : ""));
+            _lastBuildMs = swBuild.Elapsed.TotalMilliseconds;
+            ModLog.Info("曲目表已导出: " + n + " 首"
+                + (_disableFilterOff ? " (disable 过滤已关闭)" : "")
+                + " 用时 " + _lastBuildMs.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "ms");
             return sb.ToString();
         }
 
@@ -1308,7 +1386,7 @@ namespace SongRequestMod
                             _fDisableProp = pv;
                         }
                     }
-                    ModLog.Info("[SongRequest] disable 判定: "
+                    ModLog.Info("disable 判定: "
                         + (_fDisable != null ? ("字段 " + _fDisable.Name)
                             : (_fDisableProp != null ? "属性 disable" : "读不到, 只看 IsDisable()")));
                 }
@@ -1328,9 +1406,56 @@ namespace SongRequestMod
 
         private static PropertyInfo _fDisableProp;
 
+        /// <summary>
+        /// 每首歌的 JSON 拆成"静态部分 + 动态部分"缓存。
+        /// 静态部分(名字/艺人/流派/BPM/版本/别名/等级/定数)只做一次反射和别名查表;
+        /// 动态部分只有谱面类型(STD/DX)和每档 enable/playable 会变, 用一个签名判断要不要重排。
+        /// 重建曲库时绝大部分歌直接 Append 缓存字符串。导出的字段顺序与拆分前一致。
+        /// </summary>
+        private sealed class Frag
+        {
+            public string Head1;    // {"id":..,"name":..,"artist":..,"genre":..,"bpm":..,"version":..
+            public string Head2;    // [,"alias":[..]],"maxLevel":M,"maxConst":C
+            public string Dyn1;     // ,"type":"..","std":..,"dx":..
+            public string Dyn2;     // ,"difficulty":[...]}
+            public int DynSig = int.MinValue;
+            public string[] LvStr = new string[5];
+            public int[] LvNum = new int[5];
+            public int[] Const10 = new int[5];
+            public bool[] XmlOn = new bool[5];
+            public int MaxLevel = -1;
+            public int MaxConst10 = -1;
+        }
+
+        private static readonly Dictionary<int, Frag> _frags = new Dictionary<int, Frag>();
+        /// <summary>拼片段时复用的缓冲(省掉 1600 多次 StringBuilder 分配)</summary>
+        private static readonly StringBuilder _fragSb = new StringBuilder(1024);
+
+        /// <summary>丢掉每首歌的 JSON 片段缓存(曲目数变了 / 别名库变了)</summary>
+        private static void ClearFrags()
+        {
+            _frags.Clear();
+        }
+
         private static void AppendMusic(StringBuilder sb, Manager.MaiStudio.MusicData md)
         {
             int id = md.GetID();
+            Frag f;
+            if (!_frags.TryGetValue(id, out f))
+            {
+                f = MakeFrag(id, md);
+                _frags[id] = f;
+            }
+            RefreshDyn(f, id);
+            sb.Append(f.Head1).Append(f.Dyn1).Append(f.Head2).Append(f.Dyn2);
+        }
+
+        /// <summary>静态部分: 只在这里做反射(名字/流派/等级)与别名查表</summary>
+        private static Frag MakeFrag(int id, Manager.MaiStudio.MusicData md)
+        {
+            Frag f = new Frag();
+            StringBuilder sb = _fragSb;
+            sb.Length = 0;
             sb.Append("{\"id\":").Append(id);
             sb.Append(",\"name\":");
             Esc(sb, md.name != null ? md.name.str : "");
@@ -1341,19 +1466,8 @@ namespace SongRequestMod
             sb.Append(",\"bpm\":").Append(md.bpm);
             sb.Append(",\"version\":");
             Esc(sb, md.AddVersion != null ? md.AddVersion.str : "");
-            bool isStd, isDx;
-            TypeOf(id, out isStd, out isDx);
-            sb.Append(",\"type\":\"").Append(isDx && isStd ? "DX+STD" : (isDx ? "DX" : "STD")).Append('"');
-            sb.Append(",\"std\":").Append(isStd ? "true" : "false");
-            sb.Append(",\"dx\":").Append(isDx ? "true" : "false");
+            f.Head1 = sb.ToString();
 
-            string[] levelStr = new string[5];
-            int[] levelNum = new int[5];
-            // 定数(谱面常数): level + levelDecimal/10, 例如 13+ 的谱面是 13.7。以 0.1 为单位存成整数, 免得浮点误差
-            int[] const10 = new int[5];
-            bool[] enable = new bool[5];
-            int maxLevel = -1;
-            int maxConst10 = -1;
             if (md.notesData != null)
             {
                 // 难度看 notesData 的位置(0=Basic .. 4=Re:Master), 不是 notesType ——
@@ -1367,20 +1481,27 @@ namespace SongRequestMod
                     {
                         continue;
                     }
-                    enable[d] = nt.isEnable;
-                    levelStr[d] = LevelStr(nt);
-                    levelNum[d] = ParseLevel(levelStr[d], nt.level);
-                    const10[d] = nt.level * 10 + Math.Max(0, Math.Min(9, nt.levelDecimal));
-                    if (nt.isEnable && levelNum[d] > maxLevel)
+                    f.XmlOn[d] = nt.isEnable;
+                    f.LvStr[d] = LevelStr(nt);
+                    f.LvNum[d] = ParseLevel(f.LvStr[d], nt.level);
+                    // 定数(谱面常数): level + levelDecimal/10, 例如 13+ 的谱面是 13.7。以 0.1 为单位存成整数, 免得浮点误差
+                    f.Const10[d] = nt.level * 10 + Math.Max(0, Math.Min(9, nt.levelDecimal));
+                    if (nt.isEnable)
                     {
-                        maxLevel = levelNum[d];
-                    }
-                    if (nt.isEnable && const10[d] > maxConst10)
-                    {
-                        maxConst10 = const10[d];
+                        if (f.LvNum[d] > f.MaxLevel)
+                        {
+                            f.MaxLevel = f.LvNum[d];
+                        }
+                        if (f.Const10[d] > f.MaxConst10)
+                        {
+                            f.MaxConst10 = f.Const10[d];
+                        }
                     }
                 }
             }
+
+            sb = _fragSb;
+            sb.Length = 0;
             // 别名(社区昵称): 单独一个数组给网页做搜索, 为空就不输出这个字段
             List<string> aliases = Aliases.For(id, md.name != null ? md.name.str : "");
             if (aliases.Count > 0)
@@ -1396,20 +1517,46 @@ namespace SongRequestMod
                 }
                 sb.Append(']');
             }
-            sb.Append(",\"maxLevel\":").Append(maxLevel < 0 ? 0 : maxLevel);
-            sb.Append(",\"maxConst\":").Append(Const(maxConst10 < 0 ? 0 : maxConst10));
-            // enable = XML 声明 且 游戏认为可玩(选曲数据的 isExistsScore)。
-            // 只信 XML 会出现"点了 14+ 跳到 14"—— 谱面文件缺失/版本没同步时游戏自己会降档。
-            bool[] playable = new bool[5];
+            sb.Append(",\"maxLevel\":").Append(f.MaxLevel < 0 ? 0 : f.MaxLevel);
+            sb.Append(",\"maxConst\":").Append(Const(f.MaxConst10 < 0 ? 0 : f.MaxConst10));
+            f.Head2 = sb.ToString();
+            return f;
+        }
+
+        /// <summary>动态部分: 谱面类型 + 每档 enable/playable。签名没变就不重排字符串</summary>
+        private static void RefreshDyn(Frag f, int id)
+        {
+            bool isStd, isDx;
+            TypeOf(id, out isStd, out isDx);
+            int sig = (isDx ? 1 : 0) | (isStd ? 2 : 0);
+            bool[] play = new bool[5];
             for (int d = 0; d < 5; d++)
             {
                 bool? gp = SelectDriver.GamePlayable(id, d);
-                playable[d] = gp.HasValue ? gp.Value : enable[d];
-                if (enable[d] && !playable[d])
+                play[d] = gp.HasValue ? gp.Value : f.XmlOn[d];
+                if (f.XmlOn[d])
                 {
-                    enable[d] = false;
+                    sig |= 1 << (2 + d);
+                }
+                if (play[d])
+                {
+                    sig |= 1 << (7 + d);
                 }
             }
+            if (f.Dyn2 != null && f.DynSig == sig)
+            {
+                return;
+            }
+            StringBuilder sb = _fragSb;
+            sb.Length = 0;
+            sb.Append(",\"type\":\"").Append(isDx && isStd ? "DX+STD" : (isDx ? "DX" : "STD")).Append('"');
+            sb.Append(",\"std\":").Append(isStd ? "true" : "false");
+            sb.Append(",\"dx\":").Append(isDx ? "true" : "false");
+            f.Dyn1 = sb.ToString();
+
+            // enable = XML 声明 且 游戏认为可玩(选曲数据的 isExistsScore)。
+            // 只信 XML 会出现"点了 14+ 跳到 14"—— 谱面文件缺失/版本没同步时游戏自己会降档。
+            sb.Length = 0;
             sb.Append(",\"difficulty\":[");
             for (int d = 0; d < 5; d++)
             {
@@ -1419,15 +1566,17 @@ namespace SongRequestMod
                 }
                 sb.Append("{\"type\":").Append(d);
                 sb.Append(",\"name\":\"").Append(DiffNames[d]).Append('"');
-                sb.Append(",\"level\":").Append(levelNum[d]);
-                sb.Append(",\"const\":").Append(Const(const10[d]));
+                sb.Append(",\"level\":").Append(f.LvNum[d]);
+                sb.Append(",\"const\":").Append(Const(f.Const10[d]));
                 sb.Append(",\"levelStr\":");
-                Esc(sb, levelStr[d] == null ? "-" : levelStr[d]);
-                sb.Append(",\"enable\":").Append(enable[d] ? "true" : "false");
-                sb.Append(",\"playable\":").Append(playable[d] ? "true" : "false");
+                Esc(sb, f.LvStr[d] == null ? "-" : f.LvStr[d]);
+                sb.Append(",\"enable\":").Append(f.XmlOn[d] && play[d] ? "true" : "false");
+                sb.Append(",\"playable\":").Append(play[d] ? "true" : "false");
                 sb.Append('}');
             }
             sb.Append("]}");
+            f.Dyn2 = sb.ToString();
+            f.DynSig = sig;
         }
 
         /// <summary>137 -> "13.7"(定数, JSON 数字; 不受系统区域设置的小数点影响)</summary>

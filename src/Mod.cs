@@ -4,10 +4,10 @@ using MelonLoader;
 using HarmonyLib;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(SongRequestMod.Mod), "SongRequest", "1.1.7", "")]
+[assembly: MelonInfo(typeof(SongRequestMod.Mod), "SongRequest", "1.1.8", "")]
 [assembly: MelonGame("sega-interactive", "Sinmai")]
-[assembly: AssemblyVersion("1.1.7.0")]
-[assembly: AssemblyFileVersion("1.1.7.0")]
+[assembly: AssemblyVersion("1.1.8.0")]
+[assembly: AssemblyFileVersion("1.1.8.0")]
 
 namespace SongRequestMod
 {
@@ -37,15 +37,15 @@ namespace SongRequestMod
                 {
                     CrashGuard.Install();   // 兜住游戏自身的 RestoreGhost/CategoryTab* 空引用闪退(默认关, 同原作者 v1.0.4)
                 }
-                ModLog.Info("[SongRequest] Harmony 已挂: MusicSelectProcess.OnStart / OnRelease");
+                ModLog.Info("Harmony 已挂: MusicSelectProcess.OnStart / OnRelease");
             }
             catch (Exception e)
             {
-                MelonLogger.Error("[SongRequest] 挂 Harmony 失败: " + e.Message);
+                MelonLogger.Error("挂 Harmony 失败: " + e.Message);
             }
             if (!Config.WebEnable)
             {
-                ModLog.Always("[SongRequest] 网页已关闭(配置 网页=true 打开)");
+                ModLog.Always("网页已关闭(配置 网页=true 打开)");
             }
         }
 
@@ -57,7 +57,6 @@ namespace SongRequestMod
                 // 上次游戏崩了没关掉的隧道进程会占着端口, 先清掉再起点歌台
                 Tunnel.KillOrphan();
                 _webOk = Web.Start(Config.Port);
-                _urlLoggedAt = Time.realtimeSinceStartup;
                 // 别名库启动就解析一次: /api/status 的"别名 N 条 / M 首"从此跟曲库有没有读出来无关
                 try
                 {
@@ -65,7 +64,7 @@ namespace SongRequestMod
                 }
                 catch (Exception e)
                 {
-                    MelonLogger.Warning("[SongRequest] 别名库预载失败: " + e.Message);
+                    ModLog.WarnOnce("别名库预载失败: " + e.Message);
                 }
             }
         }
@@ -86,7 +85,7 @@ namespace SongRequestMod
                 if (!_updateErrorLogged)
                 {
                     _updateErrorLogged = true;
-                    MelonLogger.Error("[SongRequest] OnUpdate 异常(后续不再重复报): " + e.Message);
+                    MelonLogger.Error("OnUpdate 异常(后续不再重复报): " + e.Message);
                 }
             }
         }
@@ -95,8 +94,6 @@ namespace SongRequestMod
         private static bool _webOk;
         private static volatile bool _ready;
         private static bool _remoteStarted;
-        private static float _urlLoggedAt = -1f;
-        private static int _urlRelog;
         private float _liveTimer;
 
         /// <summary>
@@ -128,7 +125,7 @@ namespace SongRequestMod
                 return false;
             }
             _ready = true;
-            ModLog.Always("[SongRequest] 游戏数据就绪, 开始工作");
+            ModLog.Info("游戏数据就绪, 开始工作");
             return true;
         }
 
@@ -174,8 +171,42 @@ namespace SongRequestMod
     }
 
     /// <summary>日志: 默认只留「点歌台地址 + 报错」, 详细日志=true 才输出过程</summary>
+    /// <summary>
+    /// 日志: 默认只留启动地址 + 报错。
+    ///   Always   = 默认显示
+    ///   Info     = 详细日志=true 才输出过程
+    ///   WarnOnce = 同一条警告只提示一次, 防止轮询 / 反复点歌刷屏
+    /// (不用自己加 [SongRequest] 前缀, MelonLoader 会自动加 mod 名)
+    /// </summary>
     internal static class ModLog
     {
+        private static readonly System.Collections.Generic.HashSet<string> _warned =
+            new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+
+        internal static void WarnOnce(string msg)
+        {
+            lock (_warned)
+            {
+                if (!_warned.Add(msg))
+                {
+                    return;
+                }
+            }
+            MelonLogger.Warning(msg);
+        }
+
+        internal static void ErrorOnce(string msg)
+        {
+            lock (_warned)
+            {
+                if (!_warned.Add(msg))
+                {
+                    return;
+                }
+            }
+            MelonLogger.Error(msg);
+        }
+
         internal static void Info(string msg)
         {
             if (Config.VerboseLog)
@@ -235,7 +266,7 @@ namespace SongRequestMod
                 if (!System.IO.File.Exists(PathFile))
                 {
                     Save();
-                    MelonLogger.Msg("[SongRequest] 已生成配置: " + PathFile);
+                    ModLog.Info("已生成配置: " + PathFile);
                     return;
                 }
                 foreach (string raw in System.IO.File.ReadAllLines(PathFile, System.Text.Encoding.UTF8))
@@ -294,7 +325,7 @@ namespace SongRequestMod
             }
             catch (Exception e)
             {
-                MelonLogger.Error("[SongRequest] 读配置失败: " + e.Message);
+                MelonLogger.Error("读配置失败: " + e.Message);
             }
             EnsureAllKeys();
         }
@@ -311,7 +342,7 @@ namespace SongRequestMod
                 {
                     if (txt.IndexOf(need[i] + "=", StringComparison.Ordinal) < 0)
                     {
-                        MelonLogger.Msg("[SongRequest] 配置缺 " + need[i] + " -> 自动补全并重写 " + PathFile);
+                        ModLog.Info("配置缺 " + need[i] + " -> 自动补全并重写 " + PathFile);
                         Save();
                         return;
                     }
@@ -319,7 +350,7 @@ namespace SongRequestMod
             }
             catch (Exception e)
             {
-                MelonLogger.Warning("[SongRequest] 补全配置失败: " + e.Message);
+                ModLog.WarnOnce("补全配置失败: " + e.Message);
             }
         }
 
@@ -372,7 +403,7 @@ namespace SongRequestMod
             }
             catch (Exception e)
             {
-                MelonLogger.Error("[SongRequest] 写配置失败: " + e.Message);
+                MelonLogger.Error("写配置失败: " + e.Message);
             }
         }
     }

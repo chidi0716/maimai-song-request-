@@ -23,7 +23,6 @@ namespace SongRequestMod
     internal static class Web
     {
         private static HttpListener _listener;
-        private static Thread _thread;
         private static volatile bool _running;
         private static List<string> _lanUrls;
 
@@ -49,7 +48,7 @@ namespace SongRequestMod
                     }
                     // 某个局域网 IP 绑不上(网卡刚换 IP / 被别的程序占着)会让整个 Start 失败, 连本机都打不开 ->
                     // 退一步只开本机, 至少电脑上能用
-                    MelonLogger.Warning("[SongRequest] 區域網路位址綁定失敗, 只開放本機存取: " + e1.Message);
+                    ModLog.WarnOnce("區域網路位址綁定失敗, 只開放本機存取: " + e1.Message);
                     lans = new List<string>();
                     _listener = Listen(port, lans);
                 }
@@ -70,13 +69,13 @@ namespace SongRequestMod
                         lanTxt += (i == 0 ? "    手機(同網): http://" : " 或 http://") + _lanUrls[i] + ":" + port + "/";
                     }
                 }
-                ModLog.Always("[SongRequest] v" + typeof(Web).Assembly.GetName().Version
-                    + "  本機: http://127.0.0.1:" + port + "/" + lanTxt);
+                ModLog.Always("v" + typeof(Web).Assembly.GetName().Version
+                    + " 點歌台: http://127.0.0.1:" + port + "/" + lanTxt);
                 return true;
             }
             catch (Exception e)
             {
-                MelonLogger.Error("[SongRequest] 啟動點歌台失敗(埠 " + port + " 可能被佔用, 常見原因是上次遊戲沒關乾淨,"
+                MelonLogger.Error("啟動點歌台失敗(埠 " + port + " 可能被佔用, 常見原因是上次遊戲沒關乾淨,"
                     + " 在工作管理員結束殘留的 Sinmai 後重開; 或改 SongRequestMod.toml 的「网页端口」): " + e.Message);
                 return false;
             }
@@ -180,7 +179,7 @@ namespace SongRequestMod
                     ReplyText(ctx, Forbidden(), "text/html; charset=utf-8", 403);
                     return;
                 }
-                if (path == "/api/selftest" || path == "/api/selfcheck" || path.StartsWith("/api/remote"))
+                if (path == "/api/selftest" || path == "/api/selfcheck" || path == "/api/perf" || path.StartsWith("/api/remote"))
                 {
                     ReplyJson(ctx, "{\"ok\":false,\"msg\":\"遠端存取不能使用此功能\"}", 403);
                     return;
@@ -212,6 +211,7 @@ namespace SongRequestMod
                 ReplyJson(ctx, "{\"ok\":true,\"version\":\"" + typeof(Web).Assembly.GetName().Version
                     + "\",\"songs\":" + SongTable.Count + ",\"rev\":" + SongTable.Rev
                     + ",\"aliases\":" + Aliases.Count + ",\"aliasSongs\":" + Aliases.SongCount
+                    + ",\"jacketGen\":" + Jackets.Gen
                     + ",\"state\":\"" + LiveState.State
                     + "\",\"inSelect\":" + (SelectDriver.InSelectCached ? "true" : "false")
                     + ",\"viewer\":\"" + (remote ? "remote" : "local") + "\"}");
@@ -240,6 +240,16 @@ namespace SongRequestMod
                 AddSse(ctx);
                 return;   // 注意: 不 Close, 连接保持
             }
+            if (path == "/api/perf")
+            {
+                // 排查"主线程卡了一下"用: 各项耗时(次数/上次/最大/平均, 毫秒). ?reset=1 清零再读
+                if (Query(ctx.Request.Url.Query, "reset") == "1")
+                {
+                    Perf.Reset();
+                }
+                ReplyJson(ctx, "{\"ok\":true,\"perf\":" + Perf.Json() + "}");
+                return;
+            }
             if (path == "/api/selfcheck")
             {
                 ReplyJson(ctx, MainThread.Run(SelectDriver.Diagnostics, 3000,
@@ -265,7 +275,24 @@ namespace SongRequestMod
                     ReplyJson(ctx, "{\"ok\":false,\"msg\":\"缺少 id\"}");
                     return;
                 }
-                ReplyPlay(ctx, SelectDriver.Enqueue(id, diff));
+                // 谱面类型: type=dx|std (也认 dx=1/0); 不传 = 自动(按点的 id 判断)。
+                // DX 与标准谱在游戏里是同一张卡、靠 ScoreType 切换, 网页要明确告诉我们点的是哪种
+                int scoreKind = -1;
+                string ty;
+                ty = form.TryGetValue("type", out ty) && ty != null ? ty.Trim().ToLowerInvariant() : "";
+                if (ty == "dx" || ty == "deluxe" || ty == "1")
+                {
+                    scoreKind = 1;
+                }
+                else if (ty == "std" || ty == "standard" || ty == "0")
+                {
+                    scoreKind = 0;
+                }
+                else if (form.ContainsKey("dx"))
+                {
+                    scoreKind = Int(form, "dx", 1) != 0 ? 1 : 0;
+                }
+                ReplyPlay(ctx, SelectDriver.Enqueue(id, diff, scoreKind));
                 return;
             }
             if (path == "/api/random" && method == "POST")
@@ -405,21 +432,21 @@ namespace SongRequestMod
                     {
                         _pages[name] = nc;
                     }
-                    ModLog.Info("[SongRequest] 頁面已載入: " + p + " (" + txt.Length + " 字元)");
+                    ModLog.Info("頁面已載入: " + p + " (" + txt.Length + " 字元)");
                     return txt;
                 }
-                ModLog.Info("[SongRequest] 頁面檔案沒找到: " + name + " (找過 "
+                ModLog.Info("頁面檔案沒找到: " + name + " (找過 "
                     + Path.Combine(GameDir, "Mods", "SongRequestMod", name) + " 等 4 個位置)");
             }
             catch (Exception e)
             {
-                MelonLogger.Warning("[SongRequest] 讀頁面失敗: " + e.Message);
+                ModLog.WarnOnce("讀頁面失敗: " + e.Message);
             }
             // 磁盘上没找到 -> 用内嵌在 dll 里的那份(这样只丢一个 dll 也能用)
             string embedded = ReadEmbedded("SongRequestMod." + name);
             if (embedded != null)
             {
-                ModLog.Info("[SongRequest] 頁面用內嵌版本: " + name + " (" + embedded.Length + " 字元)");
+                ModLog.Info("頁面用內嵌版本: " + name + " (" + embedded.Length + " 字元)");
                 return embedded;
             }
             return Fallback(name);
@@ -513,24 +540,9 @@ namespace SongRequestMod
             }
             catch (Exception e)
             {
-                MelonLogger.Warning("[SongRequest] 讀內嵌資源失敗 " + logicalName + ": " + e.Message);
+                ModLog.WarnOnce("讀內嵌資源失敗 " + logicalName + ": " + e.Message);
                 return null;
             }
-        }
-
-        /// <summary>把点歌台地址再打一遍(日志被别的 mod 刷屏时用)</summary>
-        internal static void LogUrls()
-        {
-            int port = Config.Port;
-            string lanTxt = "";
-            if (_lanUrls != null && _lanUrls.Count > 0)
-            {
-                for (int i = 0; i < _lanUrls.Count; i++)
-                {
-                    lanTxt += (i == 0 ? "    手機(同網): http://" : " 或 http://") + _lanUrls[i] + ":" + port + "/";
-                }
-            }
-            ModLog.Always("[SongRequest] 點歌台: http://127.0.0.1:" + port + "/" + lanTxt);
         }
 
         /// <summary>
@@ -578,11 +590,11 @@ namespace SongRequestMod
                 Thread th = new Thread(() => SseWriter(c));
                 th.IsBackground = true;
                 th.Start();
-                ModLog.Info("[SongRequest] SSE 客戶端接入, 目前 " + _sse.Count + " 個");
+                ModLog.Info("SSE 客戶端接入, 目前 " + _sse.Count + " 個");
             }
             catch (Exception e)
             {
-                ModLog.Info("[SongRequest] SSE 建立失敗: " + e.Message);
+                ModLog.Info("SSE 建立失敗: " + e.Message);
             }
         }
 
@@ -627,7 +639,7 @@ namespace SongRequestMod
             catch
             {
             }
-            ModLog.Info("[SongRequest] SSE 斷開清理, 剩 " + _sse.Count + " 個");
+            ModLog.Info("SSE 斷開清理, 剩 " + _sse.Count + " 個");
         }
 
         /// <summary>
@@ -742,7 +754,7 @@ namespace SongRequestMod
             }
             catch (Exception e)
             {
-                MelonLogger.Warning("[SongRequest] 取本機 IP 失敗: " + e.Message);
+                ModLog.WarnOnce("取本機 IP 失敗: " + e.Message);
             }
             if (ips.Count == 0)
             {

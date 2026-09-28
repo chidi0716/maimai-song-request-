@@ -1,9 +1,92 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Text;
 using System.Threading;
 
 namespace SongRequestMod
 {
+    /// <summary>
+    /// 轻量计时器: 找"主线程上到底哪儿卡了一下"。
+    /// 每个点记 次数 / 上次 / 最大 / 平均(毫秒), /api/perf 读, /api/perf?reset=1 清零。
+    /// </summary>
+    internal static class Perf
+    {
+        private sealed class Stat
+        {
+            public int N;
+            public double Total;
+            public double Max;
+            public double Last;
+        }
+
+        private static readonly Dictionary<string, Stat> _map = new Dictionary<string, Stat>();
+        private static readonly object _lk = new object();
+
+        internal static void Hit(string key, double ms)
+        {
+            if (ms < 0)
+            {
+                return;
+            }
+            lock (_lk)
+            {
+                Stat s;
+                if (!_map.TryGetValue(key, out s))
+                {
+                    s = new Stat();
+                    _map[key] = s;
+                }
+                s.N++;
+                s.Total += ms;
+                s.Last = ms;
+                if (ms > s.Max)
+                {
+                    s.Max = ms;
+                }
+            }
+        }
+
+        internal static void Reset()
+        {
+            lock (_lk)
+            {
+                _map.Clear();
+            }
+        }
+
+        private static string Num(double v)
+        {
+            return v.ToString("0.##", CultureInfo.InvariantCulture);
+        }
+
+        internal static string Json()
+        {
+            StringBuilder sb = new StringBuilder(1024);
+            sb.Append('{');
+            lock (_lk)
+            {
+                bool first = true;
+                foreach (KeyValuePair<string, Stat> kv in _map)
+                {
+                    if (!first)
+                    {
+                        sb.Append(',');
+                    }
+                    first = false;
+                    Stat s = kv.Value;
+                    sb.Append('"').Append(kv.Key).Append("\":{\"n\":").Append(s.N)
+                        .Append(",\"last\":").Append(Num(s.Last))
+                        .Append(",\"max\":").Append(Num(s.Max))
+                        .Append(",\"avg\":").Append(Num(s.N > 0 ? s.Total / s.N : 0))
+                        .Append('}');
+                }
+            }
+            sb.Append('}');
+            return sb.ToString();
+        }
+    }
+
     /// <summary>
     /// 网页线程 -> 游戏主线程 的派工器。
     /// 游戏对象 / Unity API / 我们自己的曲目表只允许在主线程读写; 网页线程要用时把活交给这里,
@@ -76,14 +159,16 @@ namespace SongRequestMod
                     job = _queue.Dequeue();
                 }
                 object result = null;
+                System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
                 try
                 {
                     result = job.Work();
                 }
                 catch (Exception e)
                 {
-                    ModLog.Info("[SongRequest] 主线程任务异常: " + e.Message);
+                    ModLog.Info("主线程任务异常: " + e.Message);
                 }
+                Perf.Hit("job", sw.Elapsed.TotalMilliseconds);
                 lock (job)
                 {
                     job.Result = result;

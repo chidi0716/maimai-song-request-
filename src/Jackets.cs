@@ -92,12 +92,19 @@ namespace SongRequestMod
         internal static void Pump()
         {
             _frame++;
+            // 点歌跳转期间(含切难度画面的动画)一张都不编: RenderTexture 回读占主线程,
+            // 跟跳转撞在同一帧就是那下"卡顿"。跳完再继续, 最多晚一两帧出图
+            if (SelectDriver.Busy)
+            {
+                return;
+            }
             bool playing = LiveState.State == "playing";
             if (playing && _frame % PlayingFrameInterval != 0)
             {
                 return;
             }
             Stopwatch sw = Stopwatch.StartNew();
+            bool did = false;
             while (true)
             {
                 Job job = null;
@@ -110,8 +117,13 @@ namespace SongRequestMod
                 }
                 if (job == null)
                 {
+                    if (did)
+                    {
+                        Perf.Hit("jacket.frame", sw.Elapsed.TotalMilliseconds);
+                    }
                     return;
                 }
+                did = true;
                 byte[] png = null;
                 if (unchecked(Environment.TickCount - job.EnqueuedAt) < StaleMs)
                 {
@@ -123,7 +135,7 @@ namespace SongRequestMod
                     {
                         if (_failed++ < 5)
                         {
-                            ModLog.Info("[SongRequest] 取曲绘失败 id=" + job.Id + ": " + e.Message);
+                            ModLog.Info("取曲绘失败 id=" + job.Id + ": " + e.Message);
                         }
                     }
                 }
@@ -131,6 +143,7 @@ namespace SongRequestMod
                 // 游玩中一次只做一张; 平时做到这一帧的预算用完为止
                 if (playing || sw.Elapsed.TotalMilliseconds >= FrameBudgetMs)
                 {
+                    Perf.Hit("jacket.frame", sw.Elapsed.TotalMilliseconds);
                     return;
                 }
             }
@@ -168,6 +181,12 @@ namespace SongRequestMod
             }
         }
 
+        /// <summary>
+        /// 曲绘"代": 只有曲绘真的可能变了(曲目数变了 -> ClearCache)才 +1, 网页拿它当缓存 key。
+        /// 以前网页每次重排列表就换 key, 浏览器把可见封面全重拉, 每张又要在主线程重新编码。
+        /// </summary>
+        internal static volatile int Gen;
+
         internal static void ClearCache()
         {
             lock (_lock)
@@ -175,6 +194,7 @@ namespace SongRequestMod
                 _cache.Clear();
                 _cacheOrder.Clear();
                 _cacheBytes = 0;
+                Gen++;
             }
         }
 
@@ -183,7 +203,7 @@ namespace SongRequestMod
             AssetManager am = AssetManager.Instance();
             if (am == null)
             {
-                ModLog.Info("[SongRequest] 曲绘: AssetManager 还没起来");
+                ModLog.Info("曲绘: AssetManager 还没起来");
                 return null;
             }
             // 优先用游戏数据里的真实资源名(jacketFile / thumbnailName):
@@ -198,7 +218,7 @@ namespace SongRequestMod
             }
             catch (Exception e)
             {
-                ModLog.Info("[SongRequest] 曲绘(" + name + ")取图异常: " + e.Message);
+                ModLog.Info("曲绘(" + name + ")取图异常: " + e.Message);
             }
             if (tex == null)
             {
@@ -223,7 +243,7 @@ namespace SongRequestMod
             }
             if (tex == null)
             {
-                ModLog.Info("[SongRequest] 曲绘没找到: id=" + id + " small=" + small + " name=" + name);
+                ModLog.Info("曲绘没找到: id=" + id + " small=" + small + " name=" + name);
                 return null;
             }
             Texture2D readable = ToReadable(tex, small ? SmallPx : MaxPx);
@@ -238,7 +258,7 @@ namespace SongRequestMod
             }
             catch (Exception e)
             {
-                ModLog.Info("[SongRequest] 曲绘编码失败 " + name + ": " + e.Message);
+                ModLog.Info("曲绘编码失败 " + name + ": " + e.Message);
                 png = null;
             }
             if (readable != tex)
@@ -247,7 +267,7 @@ namespace SongRequestMod
             }
             if (png == null)
             {
-                ModLog.Info("[SongRequest] 曲绘编码返回空: " + name);
+                ModLog.Info("曲绘编码返回空: " + name);
             }
             return png;
         }

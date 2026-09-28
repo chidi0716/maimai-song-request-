@@ -4,7 +4,7 @@
 
 **远程分享**（经 cloudflared 隧道进来、带 `Cf-Ray` / `Cf-Connecting-Ip` / `X-Forwarded-For` 头的请求）必须带本次分享的密钥：
 首次用 `?k=<密钥>` 打开，服务端写 `srk` cookie，之后同一浏览器的请求自动带上；密钥不对回 403。
-远程访问者不能用 `/api/selfcheck`、`/api/selftest`、`/api/remote*`。
+远程访问者不能用 `/api/selfcheck`、`/api/selftest`、`/api/perf`、`/api/remote*`。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -12,10 +12,11 @@
 | GET | `/overlay` | OBS 透明浮层 |
 | GET | `/api/songs[?refresh=1]` | 全部曲目 JSON |
 | GET | `/api/nowplaying` | 当前游玩状态 |
-| GET | `/api/status` | 轻量状态（`rev` 变化=曲库变化，网页据此自动刷新） |
+| GET | `/api/status` | 轻量状态（`rev` 变化=曲库变化，网页据此自动刷新；`jacketGen` 变化=封面缓存作废） |
 | GET | `/api/selfcheck` | 自检：补丁/进程/子序列/分类/光标/布防 |
+| GET | `/api/perf` | 主线程各段耗时（次数/上次/最大/平均，毫秒），`?reset=1` 清零 |
 | GET | `/api/selftest?id=&diff=` | 布防：下次进选曲界面自动点这首歌这个难度 |
-| POST | `/api/play` | 表单 `id=` `diff=`（省略=最高可用难度）。连点时只执行最新一个，前面的返回 `{"ok":false,"superseded":true}` |
+| POST | `/api/play` | 表单 `id=` `diff=` `type=`（`diff` 省略=最高可用难度；`type=dx\|std` 指定谱面类型，省略=按 `id` 判断）。连点时只执行最新一个，前面的返回 `{"ok":false,"superseded":true}` |
 | POST | `/api/random` | 表单 `diff=`（可选） |
 | GET | `/jacket?id=&s=1` | 曲绘 PNG（`s=1` 小图） |
 | GET | `/api/npstream` | **SSE**：`data: {nowplaying json}`，仅在内容变化时推送 |

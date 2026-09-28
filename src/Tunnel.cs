@@ -196,7 +196,7 @@ namespace SongRequestMod
                         {
                             _lastLine = " 最後錯誤: " + line.Trim();
                         }
-                        ModLog.Info("[SongRequest] cloudflared: " + line);
+                        ModLog.Info("cloudflared: " + line);
                         Match m = UrlRe.Match(line);
                         // api.trycloudflare.com 是它申请隧道用的接口地址, 不是分配给我们的链接
                         if (m.Success && !m.Value.StartsWith("https://api.", StringComparison.OrdinalIgnoreCase))
@@ -224,7 +224,7 @@ namespace SongRequestMod
                         }
                         if (share != null)
                         {
-                            ModLog.Always("[SongRequest] 遠端分享已開啟: " + share);
+                            ModLog.Always("遠端分享已開啟: " + share);
                         }
                     }
                 }
@@ -267,7 +267,7 @@ namespace SongRequestMod
                 _state = state;
                 _msg = msg;
             }
-            if (state == "error") MelonLogger.Warning("[SongRequest] 遠端分享: " + msg);
+            if (state == "error") ModLog.WarnOnce("遠端分享: " + msg);
         }
 
         /// <summary>访问密钥: 16 字节随机数, URL 安全的 base64</summary>
@@ -318,7 +318,7 @@ namespace SongRequestMod
                 string why = ExeProblem(p);
                 if (why == null) return p;
                 // 坏掉的 exe(以前的版本会把下载到一半的文件当成完成) -> 我们自己的下载位置就删掉重下, 别的位置只跳过
-                MelonLogger.Warning("[SongRequest] cloudflared.exe 無效(" + why + "): " + p);
+                ModLog.WarnOnce("cloudflared.exe 無效(" + why + "): " + p);
                 if (i == 0)
                 {
                     try { File.Delete(p); } catch { }
@@ -395,7 +395,7 @@ namespace SongRequestMod
                     int code = RunDownloader(curl, "-L -f -s -C - --connect-timeout 15 --speed-limit 2048 --speed-time 60 -o \""
                         + tmp + "\" \"" + DownloadUrl + "\"", tmp);
                     ok = code == 0 && ExeProblem(tmp) == null;
-                    if (!ok) ModLog.Info("[SongRequest] curl 下載第 " + (attempt + 1) + " 次未完成(結束碼 " + code + ")");
+                    if (!ok) ModLog.Info("curl 下載第 " + (attempt + 1) + " 次未完成(結束碼 " + code + ")");
                     if (code == 0 && !ok) DeleteQuietly(tmp);   // 下完了但不是正确的程序 -> 删掉重来, 别再接着续
                 }
             }
@@ -416,14 +416,14 @@ namespace SongRequestMod
                 {
                     if (File.Exists(dst)) File.Delete(dst);
                     File.Move(tmp, dst);
-                    ModLog.Always("[SongRequest] cloudflared 已下載: " + dst);
+                    ModLog.Info("cloudflared 已下載: " + dst);
                     return dst;
                 }
                 // 没下完的 .download 留着: 下次开启分享时 curl 会接着下
             }
             catch (Exception e)
             {
-                MelonLogger.Warning("[SongRequest] 儲存 cloudflared 失敗: " + e.Message);
+                ModLog.WarnOnce("儲存 cloudflared 失敗: " + e.Message);
             }
             return null;
         }
@@ -473,7 +473,7 @@ namespace SongRequestMod
             }
             catch (Exception e)
             {
-                ModLog.Info("[SongRequest] 下載失敗(" + Path.GetFileName(exe) + "): " + e.Message);
+                ModLog.Info("下載失敗(" + Path.GetFileName(exe) + "): " + e.Message);
                 return -1;
             }
         }
