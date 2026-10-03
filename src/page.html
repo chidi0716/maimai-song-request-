@@ -2807,6 +2807,10 @@ function moveSel(delta){
   scrollToSel();
 }
 function requestSelected(){
+  /* 高亮的那首不在目前的搜尋 / 篩選結果裡(例如搜尋前選的) -> 改點結果的第一首 */
+  var inView = false, v = state.view || [];
+  for (var i=0;i<v.length;i++) if (v[i].id === state.selId){ inView = true; break; }
+  if (!inView){ state.selId = null; state.selAnchor = -1; }
   if (state.selId === null){ moveSel(1); if (state.selId === null) return; }
   requestPlay(state.selId, null);
 }
@@ -2821,6 +2825,15 @@ function bindKeys(){
     if (k === 'Escape'){ elQ.value = ''; state.q = ''; scheduleRender(); hideErr(); elQ.focus(); return; }
     if (k === 'ArrowDown'){ e.preventDefault(); moveSel(1); return; }
     if (k === 'ArrowUp'){ e.preventDefault(); moveSel(-1); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+    /* Enter: 點目前高亮的那首(在搜尋框裡也行); 其他輸入框 / 按鈕上的 Enter 照瀏覽器原本的行為 */
+    if (k === 'Enter' && (el === elQ || (!typing && tag !== 'BUTTON' && tag !== 'A'))){
+      e.preventDefault(); requestSelected(); return;
+    }
+    /* R: 隨機點一首(有選難度就用那個難度); 正在搜尋框打字時不算 */
+    if ((k === 'r' || k === 'R') && !typing && el !== elQ){
+      e.preventDefault(); requestRandom(state.diffFilter >= 0 ? state.diffFilter : -1); return;
+    }
   }, true);
 }
 
