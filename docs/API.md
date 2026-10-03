@@ -20,7 +20,7 @@
 | POST | `/api/random` | 表单 `diff=`（可选） |
 | GET | `/jacket?id=&s=1` | 曲绘 PNG（`s=1` 小图） |
 | GET | `/api/npstream` | **SSE**：`data: {nowplaying json}`，仅在内容变化时推送 |
-| GET | `/api/remote` | 远程分享状态（仅本机/局域网）：`on` 分享是否开着；`state`/`msg` 为 Cloudflare 线路状态（`off\|downloading\|starting\|running\|error`）；`links` = 所有可用链接 `[{"name","url"(带密钥),"note"}]`；`notes` = 用不了的线路及原因；`pending` = 直连线路还在检查；`url` = 第一条链接 |
+| GET | `/api/remote` | 远程分享状态（仅本机/局域网）：`on` 分享是否开着；`state`/`msg` 为 Cloudflare 线路状态（`off\|downloading\|starting\|running\|error\|disabled`，`disabled` = 设置里关掉了）；`links` = 所有可用链接 `[{"name","url"(带密钥),"note"}]`；`notes` = 用不了的线路及原因；`pending` = 直连线路还在检查；`url` = 第一条链接 |
 | POST | `/api/remote/start` | 开启远程分享（后台启动，轮询 `/api/remote` 看进度；已开着但 Cloudflare 失败时只重试 Cloudflare，密钥与直连链接不变；仅本机/局域网） |
 | POST | `/api/remote/stop` | 关闭远程分享，旧链接立即失效（仅本机/局域网） |
 

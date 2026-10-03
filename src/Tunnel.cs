@@ -29,7 +29,7 @@ namespace SongRequestMod
 
         private static readonly object _lock = new object();
         private static Proc _proc;
-        private static string _state = "off";     // off / downloading / starting / running / error
+        private static string _state = "off";     // off / downloading / starting / running / error / disabled(设置里关掉了)
         private static string _msg = "";
         private static string _baseUrl;           // https://xxx.trycloudflare.com
         private static string _key;               // 本次分享的访问密钥
@@ -74,6 +74,10 @@ namespace SongRequestMod
                 StringBuilder ns = new StringBuilder();
                 if (_on)
                 {
+                    if (_state == "disabled")
+                    {
+                        notes.Insert(0, "Cloudflare 通道：已在設定中關閉");
+                    }
                     foreach (string n in notes)
                     {
                         if (ns.Length > 0) ns.Append(',');
@@ -91,6 +95,7 @@ namespace SongRequestMod
         internal static void Start()
         {
             bool fresh;
+            bool cf;
             lock (_lock)
             {
                 CheckExited();
@@ -105,14 +110,19 @@ namespace SongRequestMod
                 {
                     return;
                 }
-                _state = "starting";
-                _msg = "正在啟動通道…";
+                cf = Config.CloudflareTunnel;
+                _state = cf ? "starting" : "disabled";   // disabled: 设置里关掉了 Cloudflare, 只用直连线路
+                _msg = cf ? "正在啟動通道…" : "";
                 _baseUrl = null;
                 _lastLine = "";
             }
             if (fresh)
             {
                 Direct.Start();
+            }
+            if (!cf)
+            {
+                return;
             }
             Thread th = new Thread(Run);
             th.IsBackground = true;

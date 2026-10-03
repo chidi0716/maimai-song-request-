@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.1.10
+
+- 新增設定 `Cloudflare隧道`（預設開）：改成 `false` 就不用 Cloudflare、也不會下載 cloudflared，開分享時只用 IPv6 直連 / IPv4 直連；分享面板會註明「Cloudflare 通道：已在設定中關閉」。三條線路現在都能各自開關（`Cloudflare隧道`、`IPv6直连`、`NAT打洞`）
+
 ## v1.1.9
 
 - 新增：**遠端分享的直連線路**（不經過任何第三方伺服器，中國網路也能用，同樣免註冊）。開啟分享時和 Cloudflare 同時起，能用的連結全部列在分享面板，發任一條即可：
